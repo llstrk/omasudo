@@ -19,11 +19,11 @@ required to manage system service or unit files"). That is how an agent's
 
 ```sh
 omarchy plugin add https://github.com/llstrk/omarchy-polkit-review --enable
-omarchy restart shell    # the password dialog does not hot-reload
 ```
 
-Enabling it replaces the stock `omarchy.polkit` dialog. A few seconds after
-the shell starts, a floating terminal asks to finish setting up and lists what
+Enabling it replaces the stock `omarchy.polkit` dialog. (If `pkexec` then
+falls back to a text prompt, run `omarchy restart shell`.) A few seconds after
+the dialog loads, a floating terminal asks to finish setting up and lists what
 that changes; nothing outside the plugin folder is touched until you pick
 **Set it up**, which asks for your sudo password once. **Not now** asks again
 the next time the shell starts, **Don't ask again** stops asking.

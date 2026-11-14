@@ -10,6 +10,9 @@ set -uo pipefail
 here=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/polkit-review
 declined=$state_dir/setup-declined
+# Held while a setup prompt is open, so a second load of the dialog (enable,
+# then a shell restart) does not open another one.
+lock=$state_dir/setup.lock
 
 RULE=/etc/polkit-1/rules.d/00-subject-note.rules
 HELPER=/usr/local/lib/polkit-subject-note
@@ -38,6 +41,12 @@ claude_state() {
 }
 
 setup() {
+  mkdir -p "$state_dir"
+  exec 9>"$lock"
+  if ! flock -n 9; then
+    echo "Setup is already open in another window."
+    return 0
+  fi
   local rule=$(rule_state) claude=$(claude_state)
   local title="Finish setting up Polkit Review"
   [[ $rule == outdated ]] && title="Update Polkit Review's polkit rule"
@@ -94,6 +103,8 @@ case ${1:-status} in
   setup)
     if [[ ${2:-} == --auto ]]; then
       [[ $(rule_state) == installed || -e $declined ]] && exit 0
+      mkdir -p "$state_dir"
+      flock -n "$lock" true || exit 0  # a prompt is already open
       exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/polkit-review") setup"
     fi
     setup
