@@ -9,5 +9,6 @@
   "review.DANGEROUS": "DANGEROUS",
   "review.ERROR": "NO VERDICT",
   "review.busy": "Too many reviews running — judge the command yourself.",
-  "review.cached": "same command reviewed %1 min ago"
+  "review.cached": "same command reviewed %1 min ago",
+  "review.by": "%1"
 }

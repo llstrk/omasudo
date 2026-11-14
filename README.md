@@ -10,8 +10,9 @@ root) with one that shows **what is actually asking for root**:
   `systemctl`, `timedatectl` or `busctl`
 - the process chain that launched it (`claude → bash → systemctl`)
 - for requests coming from a coding agent (Claude Code, pi, Codex, opencode, …),
-  a verdict from Claude — **SAFE / CAUTION / DANGEROUS** — with a one-line
-  summary and concrete effects, usually within 5–10 seconds
+  a verdict — **SAFE / CAUTION / DANGEROUS** — with a one-line summary and
+  concrete effects, from the agent you choose to review (Claude Code, Codex
+  or pi), usually within 5–10 seconds
 
 The stock dialog only shows polkit's generic message ("Authentication is
 required to manage system service or unit files"). That is how an agent's
@@ -41,13 +42,30 @@ Until then, `pkexec` requests still work (the dialog assumes the newest running
 `pkexec`, marked "likely"); other requests, such as `systemctl`, show
 "requesting process unknown".
 
-Verdicts need the [Claude Code](https://claude.com/claude-code) CLI
-(`claude`), logged in; reviews use that account. Without it the dialog still
-shows the command, and the verdict line says "NO VERDICT". Setup tells you if
-it is missing.
+### Choosing the reviewer
 
-`bin/omasudo status` shows whether the rule is installed and current,
-whether `claude` was found, and whether setup was declined.
+Setup then lists the coding agents it finds on the machine, marking your
+Omarchy default agent and which ones are signed in (from `omarchy agent
+account`), and asks which one reviews requests, starting on your default
+agent. You can pick fallbacks in order, tried only when the one before can't
+answer (not installed, signed out, offline, timed out), or **No AI review** to
+see the command only.
+
+| Reviewer | How it runs |
+|---|---|
+| Claude Code | `claude -p`, Opus at low effort, read-only tools (see below) |
+| Codex | `codex exec --ephemeral`, read-only sandbox, shell/web/image tools off |
+| pi | `pi -p --no-session --no-tools`, your default pi model |
+
+Claude Code and Codex run through `omarchy-agent-account-exec`, so reviews use
+the account the agents panel marks active. Agents omasudo can't drive yet are
+listed but can't be picked.
+
+```sh
+bin/omasudo reviewer   # choose again
+bin/omasudo agents     # what was found
+bin/omasudo status     # rule state, reviewers, whether setup was declined
+```
 
 ## Update
 
@@ -80,7 +98,10 @@ dialog opens (Quickshell AuthFlow: message + action id only)
     pid from the note (≤30 s old) → /proc cmdline + parent chain → JSON
   agent in the chain?
     cached verdict for the same hash (≤10 min)?  show it
-    else bin/review.py  →  claude -p (read-only tools)  →  verdict
+    else bin/review.py
+      evidence: man-page entries for the given subcommands and flags,
+                packages, unit files of named units (bin/evidence.py)
+      → first reviewer that answers (claude / codex / pi)  →  verdict
 ```
 
 Quickshell's polkit agent does not expose the requesting PID to QML, which is
@@ -91,18 +112,32 @@ records command lines, only `<time> <pid>` per action id, on tmpfs.
 action id, the exact argv, and the contents of any files named in it, so
 `pkexec bash fix.sh` is reviewed again if `fix.sh` changes. A review keeps
 running if you dismiss the dialog, so an agent's immediate retry gets the
-verdict instantly. At most 3 reviews run at once; each is killed after 90 s.
+verdict instantly. At most 3 reviews run at once; together the reviewers of
+one request get 90 s.
+
+**Evidence.** Before any agent is asked, `bin/evidence.py` collects what a
+reviewer needs: for each program in the command (and in scripts it runs) its
+package, the man-page entries for exactly the subcommands and flags it was
+given, flags the man page doesn't document, and the state and unit file of any
+systemd unit it names. For `systemctl preset-all --dry-run` that includes the
+`--dry-run` entry saying it only applies to halt, poweroff, reboot and the
+like. So reviewers need no tools, and a fast model sees the trap too.
 
 ## Privacy and safety
 
-- Nothing is written to disk. Claude runs with `--no-session-persistence`,
-  and the plugin never logs commands or verdicts (shell output goes to the
-  journal).
+- Nothing is written to disk. Reviewers save no session
+  (`--no-session-persistence`, `--ephemeral`, `--no-session`), run in an empty
+  temporary folder, and the plugin never logs commands or verdicts (shell
+  output goes to the journal). The request reaches the reviewer on stdin, not
+  in its command line.
 - Obvious secrets are blanked before anything is sent: password/token flags,
   `*_TOKEN=` assignments, auth headers, `user:pass@` URLs, well-known token
   formats and long hex/base64 strings. This is best-effort; the command still
-  goes to Anthropic's API.
-- The reviewer loads none of your Claude Code settings, MCP servers or hooks.
+  goes to the reviewer's provider (for pi, whatever its model is).
+- Codex and pi get no tools: pi runs with `--no-tools` and without extensions,
+  skills, MCP or context files; Codex with its shell, web, image and app tools
+  disabled, MCP servers cleared and its read-only sandbox.
+- Claude Code loads none of your settings, MCP servers or hooks.
   Its tools are Read/Grep/Glob plus an allowlist of read-only commands (`man`,
   `systemctl cat/show/status`, `pacman -Q*`, `cat`, `grep`, …). It cannot read
   `~`, `/tmp`, `/var/tmp`, `/proc`, `/run/user` or `/dev/shm`. Bash runs in
@@ -119,14 +154,22 @@ always shown; read it.
 
 ## Configuration
 
-Environment variables, read by `bin/review.py` (set them in the shell's
-environment, e.g. via a uwsm env file):
+`~/.config/omasudo/config.json`, written by `bin/omasudo reviewer`:
 
-| Variable | Default | |
-|---|---|---|
-| `OMASUDO_MODEL` | `opus` | any `claude --model` value |
-| `OMASUDO_EFFORT` | `low` | `low`/`medium`/`high`; empty to omit |
-| `OMASUDO_DEBUG` | unset | print the reviewer's permission denials to stderr |
+```json
+{
+  "reviewers": ["pi", "claude"],
+  "agents": {
+    "claude": {"model": "opus", "effort": "low"}
+  }
+}
+```
+
+`agents` is optional and takes the same `model`/`effort` keys for `codex` and
+`pi`. Claude defaults to Opus at low effort; Codex and pi use their own default
+model unless you set one (`effort` is Codex's reasoning effort and pi's
+`--thinking`). `"reviewers": []` means no AI review.
+`OMASUDO_DEBUG=1` makes `bin/review.py` print why each reviewer failed.
 
 Agents are detected by process name: `claude pi omp codex opencode herdr aider
 gemini crush amp` (`AGENTS` in `bin/request-info.py`).

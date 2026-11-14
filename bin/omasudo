@@ -1,9 +1,11 @@
 #!/bin/bash
 # Omasudo setup.
-#   omasudo status        rule, claude and setup state
-#   omasudo setup         install the polkit rule (asks first; needs a terminal)
-#   omasudo setup --auto  the dialog's call when it loads: ask in a
-#                               floating terminal, unless set up or declined
+#   omasudo status        rule, reviewers and setup state
+#   omasudo setup         install the polkit rule and choose reviewers (needs a terminal)
+#   omasudo setup --auto  the dialog's call when it loads: ask in a floating
+#                         terminal if the rule or the reviewer choice is missing
+#   omasudo reviewer      choose which agents review requests, in order
+#   omasudo agents        coding agents found on this machine
 #   omasudo uninstall     remove the polkit rule
 #   omasudo update [--check|--off|--on]  new versions (see bin/update.py)
 set -uo pipefail
@@ -37,10 +39,22 @@ rule_state() {
   fi
 }
 
-claude_state() {
-  command -v claude >/dev/null && echo ok || echo missing
+agents() {
+  python3 -I "$here/bin/agents.py" "$@"
 }
 
+reviewers_state() {
+  if ! agents configured; then
+    echo "not chosen"
+  else
+    local r
+    r=$(agents get | paste -sd, -)
+    echo "${r:-none}"
+  fi
+}
+
+# setup [--prompted]: --prompted (from setup --auto) skips a rule step the
+# user declined; run by hand, setup offers the rule again.
 setup() {
   mkdir -p "$state_dir"
   exec 9>"$lock"
@@ -48,7 +62,24 @@ setup() {
     echo "Setup is already open in another window."
     return 0
   fi
-  local rule=$(rule_state) claude=$(claude_state)
+  local rule=$(rule_state)
+  if [[ $rule == installed ]]; then
+    [[ ${1:-} == --prompted ]] || echo "The polkit rule is installed."
+  elif [[ ${1:-} == --prompted && -e $declined ]]; then
+    :
+  else
+    rule_step "$rule" || return 1
+  fi
+  echo
+  if ! agents configured; then
+    agents pick
+  elif [[ ${1:-} != --prompted ]]; then
+    echo "Reviews: $(reviewers_state | sed 's/,/ → /g'). Change with: $here/bin/omasudo reviewer"
+  fi
+}
+
+rule_step() {
+  local rule=$1
   local title="Finish setting up Omasudo"
   [[ $rule == outdated ]] && title="Update Omasudo's polkit rule"
 
@@ -65,10 +96,6 @@ setup() {
     "never command lines, and makes no authorization decision."
     "polkitd restarts once; the dialog reconnects by itself."
   )
-  if [[ $claude == missing ]]; then
-    body+=("" "Claude Code (claude) is not installed, so dialogs will show the"
-           "command but no verdict. Get it at https://claude.com/claude-code")
-  fi
   gum style --border rounded --padding "1 2" --width 78 "$title" "" "${body[@]}"
   echo
 
@@ -79,7 +106,7 @@ setup() {
       if sudo "$here/system/install.sh"; then
         rm -f "$declined"
         echo
-        echo "Done. Agent requests now show the requesting command and a verdict."
+        echo "Done. Requests now show the requesting command, for D-Bus callers too."
       else
         echo "Setup failed; nothing else was changed. Retry with: $here/bin/omasudo setup" >&2
         return 1
@@ -98,17 +125,25 @@ setup() {
 case ${1:-status} in
   status)
     echo "rule=$(rule_state)"
-    echo "claude=$(claude_state)"
+    echo "reviewers=$(reviewers_state)"
     echo "declined=$([[ -e $declined ]] && echo yes || echo no)"
     ;;
   setup)
     if [[ ${2:-} == --auto ]]; then
-      [[ $(rule_state) == installed || -e $declined ]] && exit 0
+      rule_done=no
+      [[ $(rule_state) == installed || -e $declined ]] && rule_done=yes
+      [[ $rule_done == yes ]] && agents configured && exit 0
       mkdir -p "$state_dir"
       flock -n "$lock" true || exit 0  # a prompt is already open
-      exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/omasudo") setup"
+      exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/omasudo") setup --prompted"
     fi
-    setup
+    setup "${2:-}"
+    ;;
+  reviewer)
+    agents pick
+    ;;
+  agents)
+    agents list
     ;;
   update)
     shift
@@ -118,7 +153,7 @@ case ${1:-status} in
     if [[ -x $UNINSTALLER ]]; then sudo "$UNINSTALLER"; else sudo "$here/system/uninstall.sh"; fi
     ;;
   *)
-    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

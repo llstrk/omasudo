@@ -193,16 +193,21 @@ Item {
 
     var r = null
     try { r = JSON.parse(text) } catch (e) {}
-    var ok = exitCode === 0 && r && r.verdict !== "ERROR"
+    var ok = exitCode === 0 && r && r.verdict !== "ERROR" && r.verdict !== "OFF"
     if (ok) {
       pruneCache()
       var cache = Object.assign({}, reviewCache)
-      cache[key] = { verdict: r.verdict, summary: r.summary, details: r.details, command: r.command, at: Date.now() }
+      cache[key] = { verdict: r.verdict, summary: r.summary, details: r.details, command: r.command, reviewer: r.reviewer, at: Date.now() }
       reviewCache = cache
     }
 
     if (agentActive && currentKey === key && reviewState === "running") {
-      review = ok ? r : { verdict: "ERROR", summary: strings.t("review.error"), details: "" }
+      if (r && r.verdict === "OFF") {  // no AI review chosen: show the command only
+        review = null
+        reviewState = ""
+        return
+      }
+      review = ok ? r : { verdict: "ERROR", summary: (r && r.verdict === "ERROR" && r.summary) || strings.t("review.error"), details: "" }
       reviewState = "done"
     }
   }
@@ -759,6 +764,7 @@ Item {
             ? strings.t("review.running").arg(root.reviewSeconds)
             : (root.review
                 ? strings.t("review." + root.review.verdict) + " — " + (root.review.summary || "")
+                  + (root.review.reviewer ? "  (" + strings.t("review.by").arg(root.review.reviewer) + ")" : "")
                   + (root.review.cachedAt ? "  (" + strings.t("review.cached").arg(Math.max(1, Math.round((Date.now() - root.review.cachedAt) / 60000))) + ")" : "")
                 : "")
           color: root.verdictColor
