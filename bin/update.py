@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update checks for Polkit Review, after omaprofile's.
+"""Update checks for Omasudo, after omaprofile's.
 
   update.py              show what's new, ask, update through `omarchy plugin update`
   update.py --check      check now and print the result
@@ -14,7 +14,7 @@
 
 A plugin added with `omarchy plugin add` is a git clone, so a check is a
 `git fetch` of its origin and a look at the fetched manifest.json; nothing else
-is contacted. State lives in ~/.local/state/polkit-review/update.json:
+is contacted. State lives in ~/.local/state/omasudo/update.json:
 
   checked    when the last check reached the repository (seconds)
   available  the newest version found, when newer than this one
@@ -35,8 +35,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CLI = ROOT / "bin" / "polkit-review"
-STATE_DIR = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "polkit-review"
+CLI = ROOT / "bin" / "omasudo"
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "omasudo"
 STATE = STATE_DIR / "update.json"
 OMARCHY_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omarchy"
 PLUGINS_DIR = OMARCHY_CONFIG / "plugins"
@@ -59,7 +59,7 @@ def manifest(text=None):
         return {}
 
 
-PLUGIN_ID = str(manifest().get("id", "llstrk.polkit-review"))
+PLUGIN_ID = str(manifest().get("id", "llstrk.omasudo"))
 
 
 def installed_version():
@@ -161,14 +161,14 @@ def notify_update(version, body):
     history and run it from there; plain notify-send buttons only work while the
     toast is up and this process is still waiting for the click."""
     updater = f"{shlex.quote(str(CLI))} update"
-    title = f"Polkit Review {version} is available"
+    title = f"Omasudo {version} is available"
     if shutil.which("omarchy-notification-send"):
-        subprocess.run(["omarchy-notification-send", "--app-name", "Polkit Review", "-u", "normal",
+        subprocess.run(["omarchy-notification-send", "--app-name", "Omasudo", "-u", "normal",
                         title, body,
                         "--action", "Update", FLOATING_TERMINAL, updater],
                        capture_output=True)
     elif shutil.which("notify-send"):
-        proc = subprocess.run(["notify-send", "-a", "Polkit Review", "-i", "dialog-password",
+        proc = subprocess.run(["notify-send", "-a", "Omasudo", "-i", "dialog-password",
                                "-A", "update=Update", title, body], capture_output=True, text=True)
         if proc.stdout.strip() == "update":
             open_updater()
@@ -213,7 +213,7 @@ def status():
     available = state.get("available")
     waiting = available if newer(available, current) and managed() and not state.get("off") else None
     show = bool(waiting) and state.get("dismissed") != waiting
-    return {"icon": show, "tooltip": f"Polkit Review {waiting} available" if show else "",
+    return {"icon": show, "tooltip": f"Omasudo {waiting} available" if show else "",
             "installed": current, "available": waiting, "managed": managed()}
 
 
@@ -258,7 +258,7 @@ def keep_plugin_enabled():
     if not isinstance(plugins, list) or any(entry_id(e) == PLUGIN_ID for e in plugins):
         return
     config["plugins"] = plugins + [{"id": PLUGIN_ID}]
-    tmp = SHELL_CONFIG.with_name(SHELL_CONFIG.name + ".polkit-review.tmp")
+    tmp = SHELL_CONFIG.with_name(SHELL_CONFIG.name + ".omasudo.tmp")
     tmp.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
     shutil.copymode(SHELL_CONFIG, tmp)
     os.replace(tmp, SHELL_CONFIG)
@@ -287,19 +287,19 @@ def ask(question, default=True):
 def run():
     current = installed_version()
     if not managed():
-        print(f"Polkit Review {current} runs from {ROOT}, not from a plugin Omarchy installed.\n"
+        print(f"Omasudo {current} runs from {ROOT}, not from a plugin Omarchy installed.\n"
               f"Update it with: cd {shlex.quote(str(ROOT))} && git pull")
         return 0
     try:
         latest = check().get("available")
     except UpdateError as e:
-        print(f"polkit-review: {e}", file=sys.stderr)
+        print(f"omasudo: {e}", file=sys.stderr)
         return 1
     if not newer(latest, current):
-        print(f"Polkit Review {current} is up to date.")
+        print(f"Omasudo {current} is up to date.")
         return 0
 
-    print(f"Polkit Review {current} → {latest}\n")
+    print(f"Omasudo {current} → {latest}\n")
     for version, lines in changes(fetched_file("CHANGELOG.md"), current, latest):
         print(version)
         for line in lines:
@@ -342,7 +342,7 @@ def main():
         try:
             latest = check().get("available")
         except UpdateError as e:
-            sys.exit(f"polkit-review: {e}")
+            sys.exit(f"omasudo: {e}")
         print(f"{latest} available (installed {installed_version()})" if latest
               else f"{installed_version()} is up to date")
     elif arg in ("--off", "--on"):

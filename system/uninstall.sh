@@ -8,8 +8,9 @@ set -euo pipefail
 rm -f /etc/polkit-1/rules.d/00-subject-note.rules \
       /usr/local/lib/polkit-subject-note \
       /etc/systemd/system/polkit.service.d/subject-note.conf \
-      /usr/local/lib/polkit-review/uninstall.sh \
-      /usr/local/lib/polkit-review/rule.sha256
-rmdir /usr/local/lib/polkit-review /etc/systemd/system/polkit.service.d 2>/dev/null || true
+      /usr/local/lib/omasudo/uninstall.sh \
+      /usr/local/lib/omasudo/rule.sha256
+rm -rf /usr/local/lib/polkit-review  # pre-rename location
+rmdir /usr/local/lib/omasudo /etc/systemd/system/polkit.service.d 2>/dev/null || true
 systemctl daemon-reload
-echo "Removed Polkit Review's polkit rule."
+echo "Removed Omasudo's polkit rule."

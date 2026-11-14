@@ -1,7 +1,10 @@
-# Polkit Review
+# Omasudo
+
+The sudo password popup that tells you what you're approving.
 
 An [Omarchy](https://omarchy.org) shell plugin that replaces the stock polkit
-password dialog with one that shows **what is actually asking for root**:
+password dialog (the popup `pkexec`, `systemctl` and friends use to ask for
+root) with one that shows **what is actually asking for root**:
 
 - the exact requesting command, for `pkexec` *and* D-Bus callers such as
   `systemctl`, `timedatectl` or `busctl`
@@ -18,7 +21,7 @@ required to manage system service or unit files"). That is how an agent's
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/llstrk/omarchy-polkit-review --enable
+omarchy plugin add https://github.com/llstrk/omasudo --enable
 ```
 
 Enabling it replaces the stock `omarchy.polkit` dialog. (If `pkexec` then
@@ -28,7 +31,7 @@ that changes; nothing outside the plugin folder is touched until you pick
 **Set it up**, which asks for your sudo password once. **Not now** asks again
 the next time the shell starts, **Don't ask again** stops asking.
 
-Setting up (or running `bin/polkit-review setup` from the plugin folder)
+Setting up (or running `bin/omasudo setup` from the plugin folder)
 installs a small polkit rule: `/etc/polkit-1/rules.d/00-subject-note.rules`,
 its helper `/usr/local/lib/polkit-subject-note`, a polkitd drop-in that gives
 it a tmpfs folder, and a root-owned copy of the uninstaller. polkitd restarts
@@ -43,14 +46,14 @@ Verdicts need the [Claude Code](https://claude.com/claude-code) CLI
 shows the command, and the verdict line says "NO VERDICT". Setup tells you if
 it is missing.
 
-`bin/polkit-review status` shows whether the rule is installed and current,
+`bin/omasudo status` shows whether the rule is installed and current,
 whether `claude` was found, and whether setup was declined.
 
 ## Update
 
 Once a day the dialog checks the repository for a new version (a `git fetch`,
 nothing else is contacted). When one is out, an up-arrow icon shows on the
-right of the bar: click it to open `polkit-review update` in a floating
+right of the bar: click it to open `omasudo update` in a floating
 terminal, which lists what's new from the changelog, asks, and updates through
 `omarchy plugin update`. If the dialog itself changed it offers to restart the
 shell, and if the polkit rule changed it runs setup. A right click hides the
@@ -62,9 +65,9 @@ The icon is placed once. Dragging it off the bar is fine: the plugin is also
 recorded in `shell.json`'s plugins list, so the password dialog stays enabled.
 
 ```sh
-bin/polkit-review update           # check, show what's new, ask, update
-bin/polkit-review update --check   # check now
-bin/polkit-review update --off     # no scheduled checks (--on to resume)
+bin/omasudo update           # check, show what's new, ask, update
+bin/omasudo update --check   # check now
+bin/omasudo update --off     # no scheduled checks (--on to resume)
 ```
 
 ## How it works
@@ -121,9 +124,9 @@ environment, e.g. via a uwsm env file):
 
 | Variable | Default | |
 |---|---|---|
-| `POLKIT_REVIEW_MODEL` | `opus` | any `claude --model` value |
-| `POLKIT_REVIEW_EFFORT` | `low` | `low`/`medium`/`high`; empty to omit |
-| `POLKIT_REVIEW_DEBUG` | unset | print the reviewer's permission denials to stderr |
+| `OMASUDO_MODEL` | `opus` | any `claude --model` value |
+| `OMASUDO_EFFORT` | `low` | `low`/`medium`/`high`; empty to omit |
+| `OMASUDO_DEBUG` | unset | print the reviewer's permission denials to stderr |
 
 Agents are detected by process name: `claude pi omp codex opencode herdr aider
 gemini crush amp` (`AGENTS` in `bin/request-info.py`).
@@ -140,11 +143,11 @@ diff -u /usr/share/omarchy/shell/plugins/polkit/PolkitAgent.qml PolkitAgent.qml
 ## Uninstall
 
 ```sh
-omarchy plugin remove llstrk.polkit-review
+omarchy plugin remove llstrk.omasudo
 ```
 
 This restores the stock dialog. As the plugin unloads it sees its folder go,
 and a floating terminal asks whether to remove the polkit rule too (sudo).
 Saying no leaves the rule in place; remove it later with
-`sudo /usr/local/lib/polkit-review/uninstall.sh`. polkitd is not restarted, so
+`sudo /usr/local/lib/omasudo/uninstall.sh`. polkitd is not restarted, so
 the stock dialog keeps working.

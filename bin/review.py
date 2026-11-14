@@ -19,8 +19,8 @@ import sys
 import tempfile
 import unicodedata
 
-MODEL = os.environ.get("POLKIT_REVIEW_MODEL", "opus")
-EFFORT = os.environ.get("POLKIT_REVIEW_EFFORT", "low")
+MODEL = os.environ.get("OMASUDO_MODEL", "opus")
+EFFORT = os.environ.get("OMASUDO_EFFORT", "low")
 TIMEOUT = 90  # keeps running after the dialog closes; result is cached
 MAX_FILE = 32 * 1024  # bytes inlined per named file
 MAX_FILES = 4
@@ -179,7 +179,7 @@ def main():
         "--settings", json.dumps(SETTINGS),
         "--output-format", "json",
     ]
-    with tempfile.TemporaryDirectory(prefix="polkit-review-", dir=os.environ.get("XDG_RUNTIME_DIR")) as cwd:
+    with tempfile.TemporaryDirectory(prefix="omasudo-", dir=os.environ.get("XDG_RUNTIME_DIR")) as cwd:
         try:
             proc = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.DEVNULL, text=True, start_new_session=True,
@@ -204,7 +204,7 @@ def main():
 
     try:
         res = json.loads(out)
-        if os.environ.get("POLKIT_REVIEW_DEBUG"):
+        if os.environ.get("OMASUDO_DEBUG"):
             print(json.dumps(res.get("permission_denials", []), indent=1), file=sys.stderr)
         data = res.get("structured_output")
         if data is None:

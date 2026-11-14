@@ -1,7 +1,7 @@
 {
   "request.requestedBy": "Requested by %1",
   "request.likely": "likely",
-  "request.unknown": "Requesting process unknown: Polkit Review setup is not finished (bin/polkit-review setup)",
+  "request.unknown": "Requesting process unknown: Omasudo setup is not finished (bin/omasudo setup)",
   "review.running": "Agent request — reviewing what this will do… %1s",
   "review.error": "Review failed — judge the command yourself.",
   "review.SAFE": "SAFE",

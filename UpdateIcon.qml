@@ -4,23 +4,23 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-// The update icon: hidden while Polkit Review is up to date, shown when the
+// The update icon: hidden while Omasudo is up to date, shown when the
 // daily check (run by the dialog) found a newer version. Left click opens
-// `polkit-review update` in Omarchy's floating terminal; right click hides the
+// `omasudo update` in Omarchy's floating terminal; right click hides the
 // icon until the next version. After omaprofile's.
 //
-// What to show comes from `polkit-review update --status`, read again when the
+// What to show comes from `omasudo update --status`, read again when the
 // check's state file changes and every ten minutes.
 
 BarWidget {
   id: root
-  moduleName: "llstrk.polkit-review"
+  moduleName: "llstrk.omasudo"
 
   property bool available: false
   property string tip: ""
-  readonly property string cli: decodeURIComponent(Qt.resolvedUrl("bin/polkit-review").toString().replace(/^file:\/\//, ""))
+  readonly property string cli: decodeURIComponent(Qt.resolvedUrl("bin/omasudo").toString().replace(/^file:\/\//, ""))
   readonly property string stateFile:
-    (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") || "") + "/.local/state") + "/polkit-review/update.json"
+    (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") || "") + "/.local/state") + "/omasudo/update.json"
 
   function refresh() {
     if (!statusProc.running) statusProc.running = true
@@ -32,7 +32,7 @@ BarWidget {
 
   Process {
     id: statusProc
-    command: ["sh", "-c", '[ -x "$1" ] && exec "$1" update --status', "polkit-review", root.cli]
+    command: ["sh", "-c", '[ -x "$1" ] && exec "$1" update --status', "omasudo", root.cli]
     stdout: StdioCollector {
       onStreamFinished: {
         var s = {}

@@ -1,15 +1,15 @@
 #!/bin/bash
-# Polkit Review setup.
-#   polkit-review status        rule, claude and setup state
-#   polkit-review setup         install the polkit rule (asks first; needs a terminal)
-#   polkit-review setup --auto  the dialog's call when it loads: ask in a
+# Omasudo setup.
+#   omasudo status        rule, claude and setup state
+#   omasudo setup         install the polkit rule (asks first; needs a terminal)
+#   omasudo setup --auto  the dialog's call when it loads: ask in a
 #                               floating terminal, unless set up or declined
-#   polkit-review uninstall     remove the polkit rule
-#   polkit-review update [--check|--off|--on]  new versions (see bin/update.py)
+#   omasudo uninstall     remove the polkit rule
+#   omasudo update [--check|--off|--on]  new versions (see bin/update.py)
 set -uo pipefail
 
 here=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
-state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/polkit-review
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/omasudo
 declined=$state_dir/setup-declined
 # Held while a setup prompt is open, so a second load of the dialog (enable,
 # then a shell restart) does not open another one.
@@ -18,10 +18,10 @@ lock=$state_dir/setup.lock
 RULE=/etc/polkit-1/rules.d/00-subject-note.rules
 HELPER=/usr/local/lib/polkit-subject-note
 DROPIN=/etc/systemd/system/polkit.service.d/subject-note.conf
-UNINSTALLER=/usr/local/lib/polkit-review/uninstall.sh
+UNINSTALLER=/usr/local/lib/omasudo/uninstall.sh
 # rules.d is readable only by root and polkitd, so install.sh records the
 # installed rule's hash here for status to compare.
-RULE_SUM=/usr/local/lib/polkit-review/rule.sha256
+RULE_SUM=/usr/local/lib/omasudo/rule.sha256
 
 rule_state() {
   if [[ ! -e $HELPER && ! -e $DROPIN && ! -e $UNINSTALLER ]]; then
@@ -49,12 +49,12 @@ setup() {
     return 0
   fi
   local rule=$(rule_state) claude=$(claude_state)
-  local title="Finish setting up Polkit Review"
-  [[ $rule == outdated ]] && title="Update Polkit Review's polkit rule"
+  local title="Finish setting up Omasudo"
+  [[ $rule == outdated ]] && title="Update Omasudo's polkit rule"
 
   local body=(
     "To show which program asked for root, including systemctl and other"
-    "D-Bus requests (not just pkexec), Polkit Review installs a polkit rule:"
+    "D-Bus requests (not just pkexec), Omasudo installs a polkit rule:"
     ""
     "  $RULE"
     "  $HELPER"
@@ -81,13 +81,13 @@ setup() {
         echo
         echo "Done. Agent requests now show the requesting command and a verdict."
       else
-        echo "Setup failed; nothing else was changed. Retry with: $here/bin/polkit-review setup" >&2
+        echo "Setup failed; nothing else was changed. Retry with: $here/bin/omasudo setup" >&2
         return 1
       fi
       ;;
     Don*)
       mkdir -p "$state_dir" && : > "$declined"
-      echo "Won't ask again. To set up later, run: $here/bin/polkit-review setup"
+      echo "Won't ask again. To set up later, run: $here/bin/omasudo setup"
       ;;
     *)
       echo "Asking again next time the shell starts."
@@ -106,7 +106,7 @@ case ${1:-status} in
       [[ $(rule_state) == installed || -e $declined ]] && exit 0
       mkdir -p "$state_dir"
       flock -n "$lock" true || exit 0  # a prompt is already open
-      exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/polkit-review") setup"
+      exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/omasudo") setup"
     fi
     setup
     ;;

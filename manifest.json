@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "llstrk.polkit-review",
-  "name": "Polkit Review",
-  "version": "0.3.0",
+  "id": "llstrk.omasudo",
+  "name": "Omasudo",
+  "version": "0.4.0",
   "author": "llstrk",
-  "description": "Polkit password dialog that shows the requesting command and, for coding-agent requests, an AI review of what it will do.",
+  "description": "The sudo password popup that shows what you're approving: the requesting command and, for coding-agent requests, an AI verdict.",
   "omarchy": {
     "capabilities": [
       "authentication"
@@ -21,8 +21,8 @@
     "barWidget": "UpdateIcon.qml"
   },
   "barWidget": {
-    "displayName": "Polkit Review updates",
-    "description": "Shows when a new Polkit Review version is out; click to update.",
+    "displayName": "Omasudo updates",
+    "description": "Shows when a new Omasudo version is out; click to update.",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"

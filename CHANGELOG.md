@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.0
+- Renamed from Polkit Review to Omasudo (plugin id `llstrk.omasudo`, command `bin/omasudo`). Reinstall: `omarchy plugin remove llstrk.polkit-review`, then add this repository.
+
 ## 0.3.0
 - An update icon on the bar while a new version is out: click to update, right-click to hide it until the next one.
 - Dragging the icon off the bar keeps the password dialog enabled (the plugin is also recorded in shell.json's plugins list).
@@ -16,7 +19,7 @@
 - First-run setup in a floating terminal: installs the polkit rule with one sudo prompt.
 - The dialog reconnects by itself when polkitd restarts, so updates no longer break password prompts.
 - Removing the plugin offers to remove its polkit rule too.
-- Daily update check, with a notification and `polkit-review update`.
+- Daily update check, with a notification and `omasudo update`.
 
 ## 0.1.0
 - Polkit dialog that shows the requesting command and process chain, with a Claude verdict for coding-agent requests.

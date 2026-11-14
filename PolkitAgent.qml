@@ -59,7 +59,7 @@ Item {
   // just frames the centered sensor icon.
   readonly property int cardWidth: fingerprintMode ? cardHeight : Math.min(Style.space(312), Math.max(Style.space(260), panel.width - Style.gapsOut * 2))
 
-  // --- Requester + review (polkit-review additions) ---------------------------
+  // --- Requester + review (omasudo additions) ---------------------------
   // The command line and verdict live only in memory: never console.log them,
   // since omarchy-shell output goes to the journal.
   readonly property string binDir: decodeURIComponent(Qt.resolvedUrl("bin").toString().replace(/^file:\/\//, ""))
@@ -362,7 +362,7 @@ Item {
     onExited: root.laptopClosed = String(laptopClosedOut.text || "").trim() === "closed"
   }
 
-  // --- Agent lifecycle and setup (polkit-review additions) -------------------
+  // --- Agent lifecycle and setup (omasudo additions) -------------------
   readonly property string pluginDir: decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "")).replace(/\/$/, "")
 
   function createAgent() {
@@ -413,21 +413,21 @@ Item {
     }
   }
 
-  // First run: offer to install the polkit rule (bin/polkit-review decides
+  // First run: offer to install the polkit rule (bin/omasudo decides
   // whether to ask, in a floating terminal).
   Timer {
     interval: 3000
     running: true
     onTriggered: Quickshell.execDetached(["sh", "-c",
       '[ -x "$1" ] || exit 0; "$1" update --after-load; exec "$1" setup --auto',
-      "polkit-review", root.pluginDir + "/bin/polkit-review"])
+      "omasudo", root.pluginDir + "/bin/omasudo"])
   }
 
   // Update check: a minute after loading, then hourly. bin/update.py fetches
   // at most once a day and notifies once per new version.
   function checkForUpdate() {
     Quickshell.execDetached(["sh", "-c", '[ -x "$1" ] && exec "$1" update --scheduled',
-                             "polkit-review", root.pluginDir + "/bin/polkit-review"])
+                             "omasudo", root.pluginDir + "/bin/omasudo"])
   }
   Timer { interval: 60000; running: true; onTriggered: root.checkForUpdate() }
   Timer { interval: 3600000; running: true; repeat: true; onTriggered: root.checkForUpdate() }
@@ -436,12 +436,12 @@ Item {
   // deletes its folder. If the folder goes while the rule is still installed,
   // offer to remove the rule, using the root-owned copy of the uninstaller.
   readonly property string removalWatchScript: [
-    'u=/usr/local/lib/polkit-review/uninstall.sh',
+    'u=/usr/local/lib/omasudo/uninstall.sh',
     'i=0',
     'while [ $i -lt 20 ]; do',
     '  if [ ! -e "$1/manifest.json" ]; then',
     '    [ -x "$u" ] || exit 0',
-    '    exec omarchy-launch-floating-terminal-with-presentation "gum confirm \'Polkit Review was removed. Remove its polkit rule too?\' && sudo $u"',
+    '    exec omarchy-launch-floating-terminal-with-presentation "gum confirm \'Omasudo was removed. Remove its polkit rule too?\' && sudo $u"',
     '  fi',
     '  sleep 0.5; i=$((i + 1))',
     'done'
@@ -449,7 +449,7 @@ Item {
   property string watchDir: pluginDir
   Component.onDestruction: {
     if (root.watchDir)
-      Quickshell.execDetached(["sh", "-c", root.removalWatchScript, "polkit-review-removal-watch", root.watchDir])
+      Quickshell.execDetached(["sh", "-c", root.removalWatchScript, "omasudo-removal-watch", root.watchDir])
   }
 
   Component {
