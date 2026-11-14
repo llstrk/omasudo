@@ -148,13 +148,22 @@ def check(scheduled=False):
     return state
 
 
-def notify_with_buttons(summary, body, buttons):
-    if not shutil.which("notify-send"):
-        return ""
-    argv = ["notify-send", "-a", "Polkit Review", "-i", "dialog-password"]
-    for name, label in buttons:
-        argv += ["-A", f"{name}={label}"]
-    return subprocess.run([*argv, summary, body], capture_output=True, text=True).stdout.strip()
+def notify_update(version, body):
+    """Announce a version. Omarchy's own notifications keep the Update button in
+    history and run it from there; plain notify-send buttons only work while the
+    toast is up and this process is still waiting for the click."""
+    updater = f"{shlex.quote(str(CLI))} update"
+    title = f"Polkit Review {version} is available"
+    if shutil.which("omarchy-notification-send"):
+        subprocess.run(["omarchy-notification-send", "--app-name", "Polkit Review", "-u", "normal",
+                        title, body,
+                        "--action", "Update", FLOATING_TERMINAL, updater],
+                       capture_output=True)
+    elif shutil.which("notify-send"):
+        proc = subprocess.run(["notify-send", "-a", "Polkit Review", "-i", "dialog-password",
+                               "-A", "update=Update", title, body], capture_output=True, text=True)
+        if proc.stdout.strip() == "update":
+            open_updater()
 
 
 def open_updater():
@@ -184,10 +193,7 @@ def scheduled():
         save_state(state)
     news = changes(fetched_file("CHANGELOG.md"), installed_version(), waiting)
     body = " ".join(news[0][1][:2]) if news else ""
-    choice = notify_with_buttons(f"Polkit Review {waiting} is available", body or "Update to see what's new.",
-                                 [("update", "Update"), ("later", "Not now")])
-    if choice == "update":
-        open_updater()
+    notify_update(waiting, body or "Update to see what's new.")
 
 
 def ask(question, default=True):

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.2
+- The update notice's Update button now stays in notification history and works after the toast is gone.
+
 ## 0.2.1
 - Turning update checks off also silences a version an earlier check already found.
 - A version bump alone no longer asks to restart the shell.

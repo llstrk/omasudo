@@ -50,7 +50,7 @@ whether `claude` was found, and whether setup was declined.
 
 Once a day the dialog checks the repository for a new version (a `git fetch`,
 nothing else is contacted). When one is out, a notification says so, once per
-version, with an **Update** button that opens `polkit-review update` in a
+version, with an **Update** button (kept in notification history) that opens `polkit-review update` in a
 floating terminal: it lists what's new from the changelog, asks, and updates
 through `omarchy plugin update`. If the dialog itself changed it offers to
 restart the shell, and if the polkit rule changed it runs setup.
