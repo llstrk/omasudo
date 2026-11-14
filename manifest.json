@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "llstrk.polkit-review",
   "name": "Polkit Review",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "llstrk",
   "description": "Polkit password dialog that shows the requesting command and, for coding-agent requests, an AI review of what it will do.",
   "omarchy": {

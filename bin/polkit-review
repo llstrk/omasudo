@@ -5,6 +5,7 @@
 #   polkit-review setup --auto  the dialog's call when it loads: ask in a
 #                               floating terminal, unless set up or declined
 #   polkit-review uninstall     remove the polkit rule
+#   polkit-review update [--check|--off|--on]  new versions (see bin/update.py)
 set -uo pipefail
 
 here=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
@@ -109,11 +110,15 @@ case ${1:-status} in
     fi
     setup
     ;;
+  update)
+    shift
+    exec python3 -I "$here/bin/update.py" "$@"
+    ;;
   uninstall)
     if [[ -x $UNINSTALLER ]]; then sudo "$UNINSTALLER"; else sudo "$here/system/uninstall.sh"; fi
     ;;
   *)
-    sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

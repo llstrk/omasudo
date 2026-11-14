@@ -422,6 +422,15 @@ Item {
                                            "polkit-review", root.pluginDir + "/bin/polkit-review"])
   }
 
+  // Update check: a minute after loading, then hourly. bin/update.py fetches
+  // at most once a day and notifies once per new version.
+  function checkForUpdate() {
+    Quickshell.execDetached(["sh", "-c", '[ -x "$1" ] && exec "$1" update --scheduled',
+                             "polkit-review", root.pluginDir + "/bin/polkit-review"])
+  }
+  Timer { interval: 60000; running: true; onTriggered: root.checkForUpdate() }
+  Timer { interval: 3600000; running: true; repeat: true; onTriggered: root.checkForUpdate() }
+
   // `omarchy plugin remove` disables the plugin (destroying this) and then
   // deletes its folder. If the folder goes while the rule is still installed,
   // offer to remove the rule, using the root-owned copy of the uninstaller.
