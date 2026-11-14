@@ -1,7 +1,7 @@
 #!/bin/bash
-# Installs the polkit rule that records which process asked for each action,
-# so the dialog can show the exact requesting command (also for D-Bus callers
-# like systemctl, not just pkexec). Run once: sudo ./system/install.sh
+# Installs the polkit rule that notes which process asked for each action, so
+# the dialog can show the exact requesting command (also for D-Bus callers such
+# as systemctl, not just pkexec). Normally run by `bin/polkit-review setup`.
 set -euo pipefail
 [[ $EUID -eq 0 ]] || { echo "Run as root: sudo $0" >&2; exit 1; }
 src=$(cd "$(dirname "$0")" && pwd)
@@ -9,9 +9,15 @@ src=$(cd "$(dirname "$0")" && pwd)
 install -Dm644 "$src/00-subject-note.rules" /etc/polkit-1/rules.d/00-subject-note.rules
 install -Dm755 "$src/polkit-subject-note"   /usr/local/lib/polkit-subject-note
 install -Dm644 "$src/subject-note.conf"     /etc/systemd/system/polkit.service.d/subject-note.conf
-systemctl daemon-reload
-systemctl restart polkit.service
+# A root-owned copy, so the rule can be removed after the plugin folder is gone.
+install -Dm755 "$src/uninstall.sh"          /usr/local/lib/polkit-review/uninstall.sh
+# rules.d is not readable by users; this lets `polkit-review status` check the rule.
+sha256sum < "$src/00-subject-note.rules" | cut -d" " -f1 > /usr/local/lib/polkit-review/rule.sha256
+chmod 644 /usr/local/lib/polkit-review/rule.sha256
 
-[[ -d /run/polkit-subject ]] || { echo "warning: /run/polkit-subject was not created" >&2; exit 1; }
-echo "Installed. Restarting polkit drops the desktop's polkit agent, so now run:"
-echo "  omarchy restart shell"
+systemctl daemon-reload
+# polkitd's sandbox only gains the /run/polkit-subject directory on restart.
+# The Polkit Review dialog registers again within a few seconds.
+systemctl restart polkit.service
+[[ -d /run/polkit-subject ]] || { echo "error: /run/polkit-subject was not created" >&2; exit 1; }
+echo "Installed the polkit rule."

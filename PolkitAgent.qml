@@ -40,7 +40,15 @@ Item {
   property bool laptopClosed: false
   property int shakeOffset: 0
 
-  readonly property bool dialogVisible: polkitAgent.isActive || closing
+  // The agent is created from agentComponent, and created again when polkitd
+  // restarts (a restart drops every agent's registration).
+  property var polkitAgent: null
+  property int agentGeneration: 0
+  property string polkitdPid: ""
+  readonly property bool agentActive: !!(polkitAgent && polkitAgent.isActive)
+  readonly property var agentFlow: polkitAgent ? polkitAgent.flow : null
+
+  readonly property bool dialogVisible: agentActive || closing
   // We show one method at a time. Fingerprint owns the dialog while PAM is
   // waiting on the reader (lid open, sensor enrolled); the moment PAM asks for
   // a password — including immediately when the lid is shut and the clamshell
@@ -95,7 +103,7 @@ Item {
 
   function startInspection() {
     stopInspection()
-    var flow = polkitAgent.flow
+    var flow = root.agentFlow
     if (!flow) return
     // Snapshot what the review needs: the flow may be gone by the time the
     // lookup returns (e.g. cancelled within a second), and the review should
@@ -133,7 +141,7 @@ Item {
   function handleRequestInfo(lookup, text) {
     // onScreen: this lookup still belongs to the open dialog. If not, only
     // start (or skip) the review; finishReview notifies when it completes.
-    var onScreen = polkitAgent.isActive && lookup.token === inspectionToken
+    var onScreen = agentActive && lookup.token === inspectionToken
     var info
     try { info = JSON.parse(text) } catch (e) { info = { found: false } }
     if (onScreen) request = info
@@ -193,7 +201,7 @@ Item {
       reviewCache = cache
     }
 
-    if (polkitAgent.isActive && currentKey === key && reviewState === "running") {
+    if (agentActive && currentKey === key && reviewState === "running") {
       review = ok ? r : { verdict: "ERROR", summary: strings.t("review.error"), details: "" }
       reviewState = "done"
     }
@@ -255,7 +263,7 @@ Item {
   }
 
   function syncFromFlow() {
-    var flow = polkitAgent.flow
+    var flow = root.agentFlow
     if (!flow) return
 
     currentMessage = String(flow.message || "")
@@ -288,7 +296,7 @@ Item {
   }
 
   function submitResponse() {
-    var flow = polkitAgent.flow
+    var flow = root.agentFlow
     if (!flow || !flow.isResponseRequired) return
     submitted = true
     errorFlash = false
@@ -298,7 +306,7 @@ Item {
   }
 
   function cancelRequest() {
-    var flow = polkitAgent.flow
+    var flow = root.agentFlow
     passwordInput.text = ""
     submitted = false
     closing = true
@@ -354,27 +362,107 @@ Item {
     onExited: root.laptopClosed = String(laptopClosedOut.text || "").trim() === "closed"
   }
 
-  PolkitAgent {
-    id: polkitAgent
-    path: "/org/omarchy/PolkitAgent"
+  // --- Agent lifecycle and setup (polkit-review additions) -------------------
+  readonly property string pluginDir: decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "")).replace(/\/$/, "")
 
-    onAuthenticationRequestStarted: root.beginFlow()
-    onIsActiveChanged: {
-      if (isActive) root.syncFromFlow()
-      else if (!root.closing) root.resetSnapshot()
+  function createAgent() {
+    if (polkitAgent) return
+    // A new path per generation: the old object's unregister call (on destroy)
+    // must not match the new registration.
+    polkitAgent = agentComponent.createObject(root, {
+      path: "/org/omarchy/PolkitAgent" + (agentGeneration ? "_" + agentGeneration : "")
+    })
+  }
+
+  function reregisterAgent() {
+    if (agentActive) return  // never pull a live request; the next poll retries
+    if (polkitAgent) polkitAgent.destroy()
+    polkitAgent = null
+    agentGeneration++
+    recreateTimer.restart()
+  }
+
+  Component.onCompleted: createAgent()
+
+  Timer {
+    id: recreateTimer
+    interval: 500  // after the old object is gone
+    onTriggered: root.createAgent()
+  }
+
+  // polkitd forgets agents when it restarts (an update, or system/install.sh).
+  // Watch its PID and register again when it changes.
+  Timer {
+    interval: 5000
+    running: true
+    repeat: true
+    onTriggered: if (!polkitdPidProc.running) polkitdPidProc.running = true
+  }
+
+  Process {
+    id: polkitdPidProc
+    command: ["systemctl", "show", "polkit.service", "-p", "MainPID", "--value"]
+    stdout: StdioCollector { id: polkitdPidOut; waitForEnd: true }
+    onExited: {
+      var pid = String(polkitdPidOut.text || "").trim()
+      if (!pid || pid === "0") return
+      var changed = root.polkitdPid !== "" && pid !== root.polkitdPid
+      if (changed && root.agentActive) return  // keep the old PID; retry next poll
+      root.polkitdPid = pid
+      if (changed) root.reregisterAgent()
     }
-    onIsRegisteredChanged: {
-      if (isRegistered) console.log("omarchy polkit agent registered")
-      else console.warn("omarchy polkit agent is not registered; another agent may be running")
+  }
+
+  // First run: offer to install the polkit rule (bin/polkit-review decides
+  // whether to ask, in a floating terminal).
+  Timer {
+    interval: 3000
+    running: true
+    onTriggered: Quickshell.execDetached(["sh", "-c", '[ -x "$1" ] && exec "$1" setup --auto',
+                                           "polkit-review", root.pluginDir + "/bin/polkit-review"])
+  }
+
+  // `omarchy plugin remove` disables the plugin (destroying this) and then
+  // deletes its folder. If the folder goes while the rule is still installed,
+  // offer to remove the rule, using the root-owned copy of the uninstaller.
+  readonly property string removalWatchScript: [
+    'u=/usr/local/lib/polkit-review/uninstall.sh',
+    'i=0',
+    'while [ $i -lt 20 ]; do',
+    '  if [ ! -e "$1/manifest.json" ]; then',
+    '    [ -x "$u" ] || exit 0',
+    '    exec omarchy-launch-floating-terminal-with-presentation "gum confirm \'Polkit Review was removed. Remove its polkit rule too?\' && sudo $u"',
+    '  fi',
+    '  sleep 0.5; i=$((i + 1))',
+    'done'
+  ].join("\n")
+  property string watchDir: pluginDir
+  Component.onDestruction: {
+    if (root.watchDir)
+      Quickshell.execDetached(["sh", "-c", root.removalWatchScript, "polkit-review-removal-watch", root.watchDir])
+  }
+
+  Component {
+    id: agentComponent
+    PolkitAgent {
+      onAuthenticationRequestStarted: root.beginFlow()
+      onIsActiveChanged: {
+        if (isActive) root.syncFromFlow()
+        else if (!root.closing) root.resetSnapshot()
+      }
+      onIsRegisteredChanged: {
+        if (isRegistered) console.log("omarchy polkit agent registered")
+        else console.warn("omarchy polkit agent is not registered; another agent may be running")
+      }
     }
   }
 
   Connections {
-    target: polkitAgent.flow
+    target: root.agentFlow
 
     function onIsResponseRequiredChanged() {
       root.syncFromFlow()
-      if (!polkitAgent.flow || !polkitAgent.flow.isResponseRequired) passwordInput.text = ""
+      if (!root.agentFlow || !root.agentFlow.isResponseRequired) passwordInput.text = ""
       Qt.callLater(root.refocus)
     }
 

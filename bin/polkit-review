@@ -1,0 +1,108 @@
+#!/bin/bash
+# Polkit Review setup.
+#   polkit-review status        rule, claude and setup state
+#   polkit-review setup         install the polkit rule (asks first; needs a terminal)
+#   polkit-review setup --auto  the dialog's call when it loads: ask in a
+#                               floating terminal, unless set up or declined
+#   polkit-review uninstall     remove the polkit rule
+set -uo pipefail
+
+here=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/polkit-review
+declined=$state_dir/setup-declined
+
+RULE=/etc/polkit-1/rules.d/00-subject-note.rules
+HELPER=/usr/local/lib/polkit-subject-note
+DROPIN=/etc/systemd/system/polkit.service.d/subject-note.conf
+UNINSTALLER=/usr/local/lib/polkit-review/uninstall.sh
+# rules.d is readable only by root and polkitd, so install.sh records the
+# installed rule's hash here for status to compare.
+RULE_SUM=/usr/local/lib/polkit-review/rule.sha256
+
+rule_state() {
+  if [[ ! -e $HELPER && ! -e $DROPIN && ! -e $UNINSTALLER ]]; then
+    echo missing
+  elif [[ $(cat "$RULE_SUM" 2>/dev/null) == "$(sha256sum < "$here/system/00-subject-note.rules" | cut -d' ' -f1)" ]] \
+    && cmp -s "$here/system/polkit-subject-note" "$HELPER" \
+    && cmp -s "$here/system/subject-note.conf" "$DROPIN" \
+    && cmp -s "$here/system/uninstall.sh" "$UNINSTALLER" \
+    && [[ -d /run/polkit-subject ]]; then
+    echo installed
+  else
+    echo outdated
+  fi
+}
+
+claude_state() {
+  command -v claude >/dev/null && echo ok || echo missing
+}
+
+setup() {
+  local rule=$(rule_state) claude=$(claude_state)
+  local title="Finish setting up Polkit Review"
+  [[ $rule == outdated ]] && title="Update Polkit Review's polkit rule"
+
+  local body=(
+    "To show which program asked for root, including systemctl and other"
+    "D-Bus requests (not just pkexec), Polkit Review installs a polkit rule:"
+    ""
+    "  $RULE"
+    "  $HELPER"
+    "  $DROPIN"
+    "  $UNINSTALLER (and the rule's hash next to it)"
+    ""
+    "It notes the requesting PID per action in /run/polkit-subject (tmpfs),"
+    "never command lines, and makes no authorization decision."
+    "polkitd restarts once; the dialog reconnects by itself."
+  )
+  if [[ $claude == missing ]]; then
+    body+=("" "Claude Code (claude) is not installed, so dialogs will show the"
+           "command but no verdict. Get it at https://claude.com/claude-code")
+  fi
+  gum style --border rounded --padding "1 2" --width 78 "$title" "" "${body[@]}"
+  echo
+
+  local choice
+  choice=$(gum choose "Set it up (asks for your password)" "Not now" "Don't ask again") || choice="Not now"
+  case $choice in
+    Set*)
+      if sudo "$here/system/install.sh"; then
+        rm -f "$declined"
+        echo
+        echo "Done. Agent requests now show the requesting command and a verdict."
+      else
+        echo "Setup failed; nothing else was changed. Retry with: $here/bin/polkit-review setup" >&2
+        return 1
+      fi
+      ;;
+    Don*)
+      mkdir -p "$state_dir" && : > "$declined"
+      echo "Won't ask again. To set up later, run: $here/bin/polkit-review setup"
+      ;;
+    *)
+      echo "Asking again next time the shell starts."
+      ;;
+  esac
+}
+
+case ${1:-status} in
+  status)
+    echo "rule=$(rule_state)"
+    echo "claude=$(claude_state)"
+    echo "declined=$([[ -e $declined ]] && echo yes || echo no)"
+    ;;
+  setup)
+    if [[ ${2:-} == --auto ]]; then
+      [[ $(rule_state) == installed || -e $declined ]] && exit 0
+      exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/polkit-review") setup"
+    fi
+    setup
+    ;;
+  uninstall)
+    if [[ -x $UNINSTALLER ]]; then sudo "$UNINSTALLER"; else sudo "$here/system/uninstall.sh"; fi
+    ;;
+  *)
+    sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//' >&2
+    exit 2
+    ;;
+esac

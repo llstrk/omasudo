@@ -19,26 +19,32 @@ required to manage system service or unit files"). That is how an agent's
 
 ```sh
 omarchy plugin add https://github.com/llstrk/omarchy-polkit-review --enable
+omarchy restart shell    # the password dialog does not hot-reload
 ```
 
-The plugin is a clone of `omarchy.polkit`, so enabling it disables the stock
-agent. Auth plugins do not hot-reload; run `omarchy restart shell` afterwards.
+Enabling it replaces the stock `omarchy.polkit` dialog. A few seconds after
+the shell starts, a floating terminal asks to finish setting up and lists what
+that changes; nothing outside the plugin folder is touched until you pick
+**Set it up**, which asks for your sudo password once. **Not now** asks again
+the next time the shell starts, **Don't ask again** stops asking.
 
-Then, for exact attribution, install the polkit rule (once, as root):
+Setting up (or running `bin/polkit-review setup` from the plugin folder)
+installs a small polkit rule: `/etc/polkit-1/rules.d/00-subject-note.rules`,
+its helper `/usr/local/lib/polkit-subject-note`, a polkitd drop-in that gives
+it a tmpfs folder, and a root-owned copy of the uninstaller. polkitd restarts
+once; the dialog notices and registers again within a few seconds.
 
-```sh
-cd ~/.config/omarchy/plugins/llstrk.polkit-review
-sudo ./system/install.sh
-omarchy restart shell
-```
+Until then, `pkexec` requests still work (the dialog assumes the newest running
+`pkexec`, marked "likely"); other requests, such as `systemctl`, show
+"requesting process unknown".
 
-Without the rule, `pkexec` requests still work (the dialog assumes the newest
-running `pkexec`, marked "likely"); other requests show "requesting process
-unknown".
+Verdicts need the [Claude Code](https://claude.com/claude-code) CLI
+(`claude`), logged in; reviews use that account. Without it the dialog still
+shows the command, and the verdict line says "NO VERDICT". Setup tells you if
+it is missing.
 
-Requires the [Claude Code](https://claude.com/claude-code) CLI (`claude`),
-logged in. Without it the dialog still shows the command, and the verdict line
-says "NO VERDICT".
+`bin/polkit-review status` shows whether the rule is installed and current,
+whether `claude` was found, and whether setup was declined.
 
 ## How it works
 
@@ -113,8 +119,11 @@ diff -u /usr/share/omarchy/shell/plugins/polkit/PolkitAgent.qml PolkitAgent.qml
 ## Uninstall
 
 ```sh
-cd ~/.config/omarchy/plugins/llstrk.polkit-review
-sudo ./system/uninstall.sh                   # first: remove deletes this folder
-omarchy plugin remove llstrk.polkit-review   # restores omarchy.polkit
-omarchy restart shell
+omarchy plugin remove llstrk.polkit-review
 ```
+
+This restores the stock dialog. As the plugin unloads it sees its folder go,
+and a floating terminal asks whether to remove the polkit rule too (sudo).
+Saying no leaves the rule in place; remove it later with
+`sudo /usr/local/lib/polkit-review/uninstall.sh`. polkitd is not restarted, so
+the stock dialog keeps working.
