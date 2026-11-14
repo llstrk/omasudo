@@ -37,7 +37,7 @@ CHECK_EVERY = 24 * 3600
 FETCH_TIMEOUT = 30
 FLOATING_TERMINAL = "omarchy-launch-floating-terminal-with-presentation"
 # Changing these needs a shell restart: the running dialog keeps its compiled QML.
-DIALOG_FILES = ["PolkitAgent.qml", "PolkitModel.js", "i18n", "manifest.json"]
+DIALOG_FILES = ["PolkitAgent.qml", "PolkitModel.js", "i18n"]
 
 
 class UpdateError(Exception):
@@ -175,6 +175,8 @@ def scheduled():
             state = check(scheduled=True)
         except Exception:  # noqa: BLE001
             return
+        if state.get("off") or not managed():
+            return  # also silences a version an earlier check found
         waiting = state.get("available")
         if not newer(waiting, installed_version()) or state.get("notified") == waiting:
             return
