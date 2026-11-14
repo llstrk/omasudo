@@ -418,8 +418,9 @@ Item {
   Timer {
     interval: 3000
     running: true
-    onTriggered: Quickshell.execDetached(["sh", "-c", '[ -x "$1" ] && exec "$1" setup --auto',
-                                           "polkit-review", root.pluginDir + "/bin/polkit-review"])
+    onTriggered: Quickshell.execDetached(["sh", "-c",
+      '[ -x "$1" ] || exit 0; "$1" update --after-load; exec "$1" setup --auto',
+      "polkit-review", root.pluginDir + "/bin/polkit-review"])
   }
 
   // Update check: a minute after loading, then hourly. bin/update.py fetches

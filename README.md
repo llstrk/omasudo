@@ -49,11 +49,17 @@ whether `claude` was found, and whether setup was declined.
 ## Update
 
 Once a day the dialog checks the repository for a new version (a `git fetch`,
-nothing else is contacted). When one is out, a notification says so, once per
-version, with an **Update** button (kept in notification history) that opens `polkit-review update` in a
-floating terminal: it lists what's new from the changelog, asks, and updates
-through `omarchy plugin update`. If the dialog itself changed it offers to
-restart the shell, and if the polkit rule changed it runs setup.
+nothing else is contacted). When one is out, an up-arrow icon shows on the
+right of the bar: click it to open `polkit-review update` in a floating
+terminal, which lists what's new from the changelog, asks, and updates through
+`omarchy plugin update`. If the dialog itself changed it offers to restart the
+shell, and if the polkit rule changed it runs setup. A right click hides the
+icon until the next version. Without the icon on the bar, a notification says
+so instead, once per version, with an **Update** button (kept in notification
+history).
+
+The icon is placed once. Dragging it off the bar is fine: the plugin is also
+recorded in `shell.json`'s plugins list, so the password dialog stays enabled.
 
 ```sh
 bin/polkit-review update           # check, show what's new, ask, update

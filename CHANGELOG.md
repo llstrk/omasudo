@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+- An update icon on the bar while a new version is out: click to update, right-click to hide it until the next one.
+- Dragging the icon off the bar keeps the password dialog enabled (the plugin is also recorded in shell.json's plugins list).
+- Without the icon on the bar, the notification is still sent, once per version.
+
 ## 0.2.2
 - The update notice's Update button now stays in notification history and works after the toast is gone.
 

@@ -6,7 +6,11 @@
   update.py --scheduled  the dialog's hourly call: at most one fetch a day, and a
                          notification with an Update button once per new version
   update.py --off/--on   stop or resume scheduled checks
-  update.py --status     print the recorded state as JSON
+  update.py --status     what the bar icon shows, as JSON (never fetches)
+  update.py --dismiss    hide the bar icon until the next version
+  update.py --open       run the updater in a floating terminal
+  update.py --after-load the dialog's call when it loads: keep the plugin
+                         enabled without its bar entry, place the icon once
 
 A plugin added with `omarchy plugin add` is a git clone, so a check is a
 `git fetch` of its origin and a look at the fetched manifest.json; nothing else
@@ -16,6 +20,8 @@ is contacted. State lives in ~/.local/state/polkit-review/update.json:
   available  the newest version found, when newer than this one
   notified   the version a notification was shown for
   off        scheduled checks are off
+  dismissed  the version whose bar icon was hidden with a right click
+  iconOffered  the bar icon was placed once; never again, so removing it sticks
 """
 import fcntl
 import json
@@ -32,7 +38,9 @@ ROOT = Path(__file__).resolve().parent.parent
 CLI = ROOT / "bin" / "polkit-review"
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "polkit-review"
 STATE = STATE_DIR / "update.json"
-PLUGINS_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omarchy" / "plugins"
+OMARCHY_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omarchy"
+PLUGINS_DIR = OMARCHY_CONFIG / "plugins"
+SHELL_CONFIG = OMARCHY_CONFIG / "shell.json"
 CHECK_EVERY = 24 * 3600
 FETCH_TIMEOUT = 30
 FLOATING_TERMINAL = "omarchy-launch-floating-terminal-with-presentation"
@@ -187,13 +195,87 @@ def scheduled():
         if state.get("off") or not managed():
             return  # also silences a version an earlier check found
         waiting = state.get("available")
-        if not newer(waiting, installed_version()) or state.get("notified") == waiting:
-            return
+        if not newer(waiting, installed_version()) or state.get("notified") == waiting or icon_on_bar():
+            return  # the bar icon says it, and stays until updated or dismissed
         state["notified"] = waiting
         save_state(state)
     news = changes(fetched_file("CHANGELOG.md"), installed_version(), waiting)
     body = " ".join(news[0][1][:2]) if news else ""
     notify_update(waiting, body or "Update to see what's new.")
+
+
+# ------------------------------------------------------------------ the bar icon
+
+def status():
+    """What the bar icon shows. Reads the state only: never touches the network."""
+    state = load_state()
+    current = installed_version()
+    available = state.get("available")
+    waiting = available if newer(available, current) and managed() and not state.get("off") else None
+    show = bool(waiting) and state.get("dismissed") != waiting
+    return {"icon": show, "tooltip": f"Polkit Review {waiting} available" if show else "",
+            "installed": current, "available": waiting, "managed": managed()}
+
+
+def dismiss():
+    state = load_state()
+    if state.get("available"):
+        state["dismissed"] = state["available"]
+        save_state(state)
+
+
+def shell_config():
+    try:
+        config = json.loads(SHELL_CONFIG.read_text())
+        return config if isinstance(config, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def entry_id(entry):
+    return entry.get("id") if isinstance(entry, dict) else entry
+
+
+def icon_on_bar():
+    config = shell_config() or {}
+    layout = (config.get("bar") or {}).get("layout") if isinstance(config.get("bar"), dict) else None
+    if not isinstance(layout, dict):
+        return False
+    return any(entry_id(e) == PLUGIN_ID for section in layout.values() if isinstance(section, list) for e in section)
+
+
+def keep_plugin_enabled():
+    """Record the plugin in shell.json's plugins list, not only on the bar.
+
+    The shell enables a plugin with a bar widget by its bar entry alone, so
+    dragging the update icon off the bar would disable the password dialog with
+    it. A plugins record keeps it enabled. A real `omarchy plugin disable` of a
+    clone clears both records, so it still disables. (After omaprofile.)"""
+    config = shell_config()
+    if config is None:
+        return
+    plugins = config.get("plugins", [])
+    if not isinstance(plugins, list) or any(entry_id(e) == PLUGIN_ID for e in plugins):
+        return
+    config["plugins"] = plugins + [{"id": PLUGIN_ID}]
+    tmp = SHELL_CONFIG.with_name(SHELL_CONFIG.name + ".polkit-review.tmp")
+    tmp.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+    shutil.copymode(SHELL_CONFIG, tmp)
+    os.replace(tmp, SHELL_CONFIG)
+    subprocess.run(["omarchy-shell", "-q", "shell", "reloadConfig"], capture_output=True)
+
+
+def after_load():
+    if not managed():
+        return
+    keep_plugin_enabled()
+    state = load_state()
+    if not state.get("iconOffered"):
+        if not icon_on_bar():
+            subprocess.run(["omarchy-shell", "-q", "shell", "putBarWidget", PLUGIN_ID,
+                            json.dumps({"section": "right"})], capture_output=True)
+        state["iconOffered"] = True
+        save_state(state)
 
 
 def ask(question, default=True):
@@ -269,7 +351,13 @@ def main():
         save_state(state)
         print("Scheduled update checks are " + ("off." if state["off"] else "on."))
     elif arg == "--status":
-        print(json.dumps({**load_state(), "installed": installed_version(), "managed": managed()}))
+        print(json.dumps(status()))
+    elif arg == "--dismiss":
+        dismiss()
+    elif arg == "--open":
+        open_updater()
+    elif arg == "--after-load":
+        after_load()
     else:
         sys.exit(__doc__)
 
