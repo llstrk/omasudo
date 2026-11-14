@@ -1,0 +1,10 @@
+#!/bin/bash
+# Run by polkitd (as user polkitd) from /etc/polkit-1/rules.d/00-subject-note.rules.
+# Records the PID of the latest requester of each action in tmpfs. See that file.
+[[ $1 =~ ^[A-Za-z0-9._-]{1,200}$ && $2 =~ ^[0-9]{1,10}$ ]] || exit 0
+dir=/run/polkit-subject
+[[ -d $dir && -w $dir ]] || exit 0
+umask 022
+tmp="$dir/.$1.$$"
+printf '%s %s\n' "$EPOCHREALTIME" "$2" > "$tmp" && mv -f "$tmp" "$dir/$1"
+exit 0

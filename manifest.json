@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "llstrk.polkit-review",
+  "name": "Polkit Review",
+  "version": "0.1.0",
+  "author": "llstrk",
+  "description": "Polkit password dialog that shows the requesting command and, for coding-agent requests, an AI review of what it will do.",
+  "omarchy": {
+    "capabilities": [
+      "authentication"
+    ],
+    "clonedFrom": "omarchy.polkit"
+  },
+  "kinds": [
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "PolkitAgent.qml"
+  }
+}

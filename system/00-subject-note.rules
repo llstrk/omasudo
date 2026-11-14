@@ -1,0 +1,9 @@
+// Notes which process asked for each polkit action, so the desktop auth dialog
+// can show the requesting command. Writes "<time> <pid>" to
+// /run/polkit-subject/<action-id> (tmpfs, overwritten each time).
+// Never stores command lines. Makes no authorization decision.
+polkit.addRule(function(action, subject) {
+  try {
+    polkit.spawn(["/usr/local/lib/polkit-subject-note", action.id, String(subject.pid)]);
+  } catch (e) {}
+});
