@@ -11,8 +11,8 @@ root) with one that shows **what is actually asking for root**:
 - the process chain that launched it (`claude → bash → systemctl`)
 - for requests coming from a coding agent (Claude Code, pi, Codex, opencode, …),
   a verdict — **SAFE / CAUTION / DANGEROUS** — with a one-line summary and
-  concrete effects, from the agent you choose to review (Claude Code, Codex
-  or pi), usually within 5–10 seconds
+  concrete effects, from the agent you choose to review (Claude Code, Codex,
+  pi, omp, opencode or Grok), usually within 5–10 seconds
 
 The stock dialog only shows polkit's generic message ("Authentication is
 required to manage system service or unit files"). That is how an agent's
@@ -54,11 +54,14 @@ see the command only.
 | Reviewer | How it runs |
 |---|---|
 | Claude Code | `claude -p`, Opus at low effort, read-only tools (see below) |
-| Codex | `codex exec --ephemeral`, read-only sandbox, shell/web/image tools off |
+| Codex | `codex exec --ephemeral`, read-only sandbox, shell/web/image/app tools off |
 | pi | `pi -p --no-session --no-tools`, your default pi model |
+| omp | `omp -p --no-session --no-tools`, rules/LSP/PTY off, your default model |
+| opencode | `opencode run --standalone` with an inline agent: tools off, every permission denied, throwaway database, your default model |
+| Grok | `grok --prompt-file`, every built-in tool removed, no subagents, memory or web |
 
-Claude Code and Codex run through `omarchy-agent-account-exec`, so reviews use
-the account the agents panel marks active. Agents omasudo can't drive yet are
+Claude Code, Codex and Grok run through `omarchy-agent-account-exec`, so
+reviews use the account the agents panel marks active. Agents omasudo can't drive yet are
 listed but can't be picked.
 
 ```sh
@@ -128,15 +131,22 @@ like. So reviewers need no tools, and a fast model sees the trap too.
 - Nothing is written to disk. Reviewers save no session
   (`--no-session-persistence`, `--ephemeral`, `--no-session`), run in an empty
   temporary folder, and the plugin never logs commands or verdicts (shell
-  output goes to the journal). The request reaches the reviewer on stdin, not
-  in its command line.
+  output goes to the journal). opencode gets a throwaway database, so the
+  review never shows in its history. Grok is the exception: it always saves
+  the session under `~/.grok/sessions`. The request reaches the reviewer on
+  stdin (Grok: a file in the private temporary folder), not in its command
+  line.
 - Obvious secrets are blanked before anything is sent: password/token flags,
   `*_TOKEN=` assignments, auth headers, `user:pass@` URLs, well-known token
   formats and long hex/base64 strings. This is best-effort; the command still
   goes to the reviewer's provider (for pi, whatever its model is).
-- Codex and pi get no tools: pi runs with `--no-tools` and without extensions,
-  skills, MCP or context files; Codex with its shell, web, image and app tools
-  disabled, MCP servers cleared and its read-only sandbox.
+- The other reviewers get no usable tools. pi and omp run with `--no-tools`
+  and without extensions, skills, MCP or context files. Codex runs with its
+  shell, web, image and app tools disabled, MCP servers cleared and its
+  read-only sandbox. opencode still offers its `skill` tool, but its agent
+  denies every permission, so a skill load is refused. Grok runs with every
+  built-in tool removed, under its `workspace` sandbox (its stricter profiles
+  refuse to start where `/run/podman` is unreadable).
 - Claude Code loads none of your settings, MCP servers or hooks.
   Its tools are Read/Grep/Glob plus an allowlist of read-only commands (`man`,
   `systemctl cat/show/status`, `pacman -Q*`, `cat`, `grep`, …). It cannot read
@@ -165,14 +175,15 @@ always shown; read it.
 }
 ```
 
-`agents` is optional and takes the same `model`/`effort` keys for `codex` and
-`pi`. Claude defaults to Opus at low effort; Codex and pi use their own default
-model unless you set one (`effort` is Codex's reasoning effort and pi's
-`--thinking`). `"reviewers": []` means no AI review.
+`agents` is optional and takes the same `model`/`effort` keys for every
+reviewer. Claude defaults to Opus at low effort; the others use their own
+default model unless you set one. `effort` is Codex's and Grok's reasoning
+effort and pi's and omp's `--thinking`; opencode takes a variant in the model
+instead (`provider/model#variant`). `"reviewers": []` means no AI review.
 `OMASUDO_DEBUG=1` makes `bin/review.py` print why each reviewer failed.
 
-Agents are detected by process name: `claude pi omp codex opencode herdr aider
-gemini crush amp` (`AGENTS` in `bin/request-info.py`).
+Agents are detected by process name: `claude pi omp codex opencode grok herdr
+aider gemini crush amp` (`AGENTS` in `bin/request-info.py`).
 
 ## Keeping up with Omarchy
 

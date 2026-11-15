@@ -118,9 +118,11 @@ def ask(name, prompt, conf, deadline):
     if not agents.installed(name):
         raise RuntimeError("not installed")
     with tempfile.TemporaryDirectory(prefix="omasudo-", dir=os.environ.get("XDG_RUNTIME_DIR")) as cwd:
-        argv, stdin, parse = reviewers.build(name, prompt, cwd, conf)
+        argv, stdin, parse, env = reviewers.build(name, prompt, cwd, conf)
         try:
-            proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            proc = subprocess.Popen(argv, cwd=cwd, env={**os.environ, **env},
+                                    stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE,
                                     stderr=subprocess.DEVNULL, text=True, start_new_session=True,
                                     preexec_fn=die_with_parent)
         except OSError:

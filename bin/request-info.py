@@ -19,7 +19,7 @@ import unicodedata
 
 NOTE_DIR = "/run/polkit-subject"
 NOTE_MAX_AGE = 30.0  # seconds
-AGENTS = {"claude", "pi", "omp", "codex", "opencode", "herdr", "aider", "gemini", "crush", "amp"}
+AGENTS = {"claude", "pi", "omp", "codex", "opencode", "grok", "herdr", "aider", "gemini", "crush", "amp"}
 # Walking up stops at these: everything above is the desktop, not the requester.
 STOP = {"systemd", "omarchy-shell", "quickshell", "qs", "Hyprland", "uwsm", "sddm", "sddm-helper", "login", "sshd", "tmux: server"}
 MAX_CMD = 4000

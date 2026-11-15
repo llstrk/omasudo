@@ -2,9 +2,10 @@
 
 Every reviewer gets one headless turn, saves no session, and answers with
 {"verdict", "summary", "details"}. The evidence omasudo gathers itself
-(bin/evidence.py) is in the prompt, so reviewers need no tools: codex and pi
-run with tools switched off. Claude keeps its read-only tools, locked down
-with deny rules and its sandbox, to look further when the evidence falls short.
+(bin/evidence.py) is in the prompt, so reviewers need no tools: Codex, pi,
+omp, opencode and Grok run with their tools switched off or denied. Claude
+keeps its read-only tools, locked down with deny rules and its sandbox, to
+look further when the evidence falls short.
 
 Claude, Codex and Grok run through omarchy-agent-account-exec when Omarchy has
 it, so a review uses the account the agents panel marks active.
@@ -14,8 +15,7 @@ import os
 import re
 import shutil
 
-SUPPORTED = ["claude", "codex", "pi"]
-LABELS = {"claude": "Claude Code", "codex": "Codex", "pi": "pi"}
+SUPPORTED = ["claude", "codex", "pi", "omp", "opencode", "grok"]
 ACCOUNT_PROVIDERS = {"claude", "codex", "grok"}
 
 SCHEMA = {
@@ -144,6 +144,62 @@ def pi(prompt, workdir, conf):
     return argv, prompt, json_in_text
 
 
+def omp(prompt, workdir, conf):
+    # oh-my-pi: pi's flags, plus its own rules, LSP and PTY switched off.
+    argv = [
+        "omp", "-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-rules",
+        "--no-lsp", "--no-pty", "--no-context-files", "--offline",
+        *([f"--model={conf['model']}"] if conf.get("model") else []),
+        *([f"--thinking={conf['effort']}"] if conf.get("effort") else []),
+        f"--system-prompt={SYSTEM + JSON_ONLY}",
+    ]
+    return argv, prompt, json_in_text
+
+
+def opencode(prompt, workdir, conf):
+    # A private server (--standalone) with an inline agent whose tools are off
+    # and whose permissions deny everything (that also covers the skill tool,
+    # which "tools" can't switch off), a throwaway database so the session
+    # never lands in your history, and no session-title call.
+    agent = {"mode": "primary", "prompt": SYSTEM + JSON_ONLY, "tools": {"*": False}, "permission": {"*": "deny"}}
+    env = {
+        "OPENCODE_CONFIG_CONTENT": json.dumps({"agent": {"omasudo-review": agent, "title": {"disable": True}}}),
+        "OPENCODE_DB": os.path.join(workdir, "opencode.db"),
+        "OPENCODE_DISABLE_CHANNEL_DB": "1",
+        "OPENCODE_DISABLE_PROJECT_CONFIG": "1",
+        "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+        "OPENCODE_DISABLE_AUTOUPDATE": "1",
+        "OPENCODE_DISABLE_FILEWATCHER": "1",
+    }
+    argv = ["opencode", "run", "--standalone", "--agent", "omasudo-review",
+            *(["-m", conf["model"]] if conf.get("model") else [])]
+    return argv, prompt, json_in_text, env
+
+
+GROK_OFF = ["run_terminal_cmd", "task", "Agent", "web_search", "web_fetch", "write", "search_replace",
+            "read_file", "grep", "glob", "list_dir", "image_gen", "monitor", "workflow"]
+
+
+def grok(prompt, workdir, conf):
+    # Grok Build: every built-in tool removed, no subagents, memory or web.
+    # Its strict/read-only sandboxes refuse to start where /run/podman is
+    # unreadable, so it runs under "workspace" (writes: this temp folder,
+    # ~/.grok, /tmp). Grok saves the session under ~/.grok/sessions.
+    path = os.path.join(workdir, "prompt.txt")
+    with open(path, "w") as f:
+        f.write(prompt)
+    argv = [
+        "grok", "--prompt-file", path, "--system-prompt-override", SYSTEM,
+        "--sandbox", "workspace", "--disallowed-tools", ",".join(GROK_OFF),
+        "--disable-web-search", "--no-subagents", "--no-plan", "--no-ask-user", "--no-memory",
+        "--no-auto-update", "--permission-mode", "dontAsk",
+        *(["-m", conf["model"]] if conf.get("model") else []),
+        *(["--reasoning-effort", conf["effort"]] if conf.get("effort") else []),
+        "--json-schema", json.dumps(SCHEMA), "--output-format", "json",
+    ]
+    return argv, None, json_in_text
+
+
 def json_in_text(out):
     """The last {...} in a plain-text answer that parses as an object."""
     out = re.sub(r"(?s)<think>.*?</think>", "", out)
@@ -157,9 +213,10 @@ def json_in_text(out):
     raise ValueError("no JSON answer")
 
 
-BUILD = {"claude": claude, "codex": codex, "pi": pi}
+BUILD = {"claude": claude, "codex": codex, "pi": pi, "omp": omp, "opencode": opencode, "grok": grok}
 
 
 def build(name, prompt, workdir, conf):
-    argv, stdin, parse = BUILD[name](prompt, workdir, conf or {})
-    return with_account(name, argv), stdin, parse
+    """argv, stdin text, parse(stdout) -> dict, extra environment."""
+    argv, stdin, parse, *env = BUILD[name](prompt, workdir, conf or {})
+    return with_account(name, argv), stdin, parse, (env[0] if env else {})

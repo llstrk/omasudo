@@ -150,8 +150,8 @@ def pick():
         "",
         "The reviewer gets the command, its process chain, and evidence omasudo",
         "gathers here (man-page entries, unit files, named scripts; secrets",
-        "redacted). Codex and pi run with no tools; Claude has read-only tools",
-        "that cannot read your home folder.",
+        "redacted). Other agents run with their tools off; Claude keeps",
+        "read-only tools that cannot read your home folder.",
     ]
     subprocess.run(["gum", "style", "--border", "rounded", "--padding", "1 2", "--width", "78", *lines])
     print()

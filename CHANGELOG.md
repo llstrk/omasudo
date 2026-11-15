@@ -1,9 +1,9 @@
 # Changelog
 
 ## 0.5.0
-- Choose the reviewer: Claude Code, Codex or pi, with fallbacks in order, or no AI review. Setup lists the agents it finds, marks the Omarchy default and which are signed in, and starts on the default. `bin/omasudo reviewer` chooses again; `bin/omasudo agents` lists them. Existing installs are asked once.
-- Evidence first: man-page entries for the given subcommands and flags, packages and unit files go into the prompt, so Codex and pi review with no tools and Claude answers faster.
-- Claude Code and Codex use the account Omarchy's agents panel marks active.
+- Choose the reviewer: Claude Code, Codex, pi, omp, opencode or Grok, with fallbacks in order, or no AI review. Setup lists the agents it finds, marks the Omarchy default and which are signed in, and starts on the default. `bin/omasudo reviewer` chooses again; `bin/omasudo agents` lists them. Existing installs are asked once.
+- Evidence first: man-page entries for the given subcommands and flags, packages and unit files go into the prompt, so the other reviewers run with their tools off and Claude answers faster.
+- Claude Code, Codex and Grok use the account Omarchy's agents panel marks active.
 - The dialog names the agent that answered. `OMASUDO_MODEL`/`OMASUDO_EFFORT` are replaced by `agents` in `~/.config/omasudo/config.json`.
 
 ## 0.4.0
