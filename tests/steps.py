@@ -28,8 +28,8 @@ from gherkin import step
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKES = Path(__file__).resolve().parent / "fakebin.py"
-TOOLS = ("gum", "mise", "omarchy-agent-account-list", "omarchy-agent-account-exec",
-         "omarchy-launch-floating-terminal-with-presentation", "sudo")
+TOOLS = ("gum", "mise", "omarchy-agent-account-list", "omarchy-agent-account-exec", "omarchy-agent-account-home",
+         "omarchy-launch-floating-terminal-with-presentation", "sudo", "bwrap")
 VERDICT_NAMES = {"NO VERDICT": "ERROR"}
 STANDARD_REQUEST = "systemctl restart systemd-journald"
 
@@ -58,6 +58,7 @@ class Context:
             "XDG_STATE_HOME": str(self.home / ".local" / "state"),
             "XDG_RUNTIME_DIR": str(self.runtime),
             "OMASUDO_SYSTEM_ROOT": str(self.sysroot),
+            "OMASUDO_BWRAP": str(self.bin / "bwrap"),
             "FAKE_LOG": str(self.log),
             "FAKE_DIR": str(self.fake_dir),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
@@ -130,7 +131,9 @@ class Context:
         return self.result
 
     def output(self):
-        return (self.last.stdout or "") + (self.last.stderr or "")
+        """What the terminal shows: colours dropped, spaces collapsed per line."""
+        text = (self.last.stdout or "") + (self.last.stderr or "")
+        return "\n".join(" ".join(line.split()) for line in re.sub(r"\x1b\[[0-9;]*[mHJ]", "", text).splitlines())
 
 
 def table_column(ctx):
@@ -253,31 +256,15 @@ def dialog_loads(ctx):
     ctx.run("omasudo setup --auto")
 
 
-def listed_agents(ctx):
-    out = ctx.last.stdout.splitlines()
-    assert "Agents found on this machine:" in out, ctx.output()
-    rows = []
-    for line in out[out.index("Agents found on this machine:") + 1:]:
-        if not line.strip():
-            break
-        name, status = line.strip().split(None, 1)
-        rows.append([name, status])
-    return rows
-
-
-@step("the picker lists the agents:")
-def picker_lists(ctx):
-    assert listed_agents(ctx) == ctx.step.table[1:], listed_agents(ctx)
-
-
 @step("the picker does not list {agent}")
 def picker_not_listed(ctx, agent):
-    assert agent not in [name for name, _ in listed_agents(ctx)], listed_agents(ctx)
+    assert agent not in questions(ctx)[0]["values"], questions(ctx)[0]["values"]
+    assert not re.search(rf"\b{re.escape(agent)}\b", ctx.output()), ctx.output()
 
 
 @step("the picker says {text}")
 def picker_says(ctx, text):
-    assert text in ctx.last.stdout, ctx.output()
+    assert text in ctx.output(), ctx.output()
 
 
 def questions(ctx):
@@ -327,7 +314,7 @@ def no_terminal(ctx):
 def rule_not_offered(ctx):
     offered = [o for q in questions(ctx) for o in q["options"]]
     assert not any(o.startswith("Set it up") for o in offered), offered
-    assert "polkit rule:" not in ctx.last.stdout, ctx.output()
+    assert "polkit rule" not in ctx.output(), ctx.output()
 
 
 # ------------------------------------------------------------------ reviewing
@@ -516,3 +503,168 @@ def private_folders(ctx):
         assert cwd not in seen, f"{cwd} was shared"
         seen.add(cwd)
     assert len(seen) == 6, seen
+
+
+# ------------------------------------------------------------------ bubblewrap
+
+SETTINGS = {"pi": ".pi/agent", "omp": ".omp/agent", "opencode": ".config/opencode", "grok": ".grok"}
+
+
+@step("bubblewrap is not installed")
+def no_bwrap(ctx):
+    ctx.env["OMASUDO_BWRAP"] = ""
+
+
+@step("each agent has its settings folder")
+def settings_folders(ctx):
+    for rel in SETTINGS.values():
+        (ctx.home / rel).mkdir(parents=True, exist_ok=True)
+    auth = ctx.home / ".local/share/opencode/auth.json"
+    auth.parent.mkdir(parents=True, exist_ok=True)
+    auth.write_text("{}")
+
+
+@step("Omarchy's active Grok account lives in {path}")
+def grok_account(ctx, path):
+    (ctx.fake_dir / "grok-home").write_text(str(ctx.home / path.removeprefix("~/")))
+    (ctx.home / path.removeprefix("~/")).mkdir(parents=True)
+
+
+def sandbox(ctx):
+    found = ctx.calls("bwrap")
+    assert found, "bwrap was not run"
+    return found[-1]["args"]
+
+
+def home_path(ctx, text):
+    return str(ctx.home / text.removeprefix("~/")) if text.startswith("~/") else text
+
+
+@step("it ran in bubblewrap")
+def in_bwrap(ctx):
+    assert ctx.agent_call(ctx.agent)["in_bwrap"]
+    assert contains_run(sandbox(ctx), ["--clearenv"]) and contains_run(sandbox(ctx), ["--tmpfs", "/"])
+
+
+@step("it ran without bubblewrap")
+def not_in_bwrap(ctx):
+    assert not ctx.agent_call(ctx.agent)["in_bwrap"]
+    assert not ctx.calls("bwrap")
+
+
+@step("its sandbox shows these read-only, and nothing else of the system:")
+def sandbox_shows(ctx):
+    args = sandbox(ctx)
+    shown = {args[i + 1] for i, a in enumerate(args) if a in ("--ro-bind", "--ro-bind-try", "--bind")}
+    for path in table_column(ctx):
+        assert contains_run(args, ["--ro-bind-try", path, path]), f"{path} not shown read-only"
+    system = {p for p in shown if not p.startswith((str(ctx.tmp), "/run/systemd/resolve", "/sys"))}
+    assert system == set(table_column(ctx)), system
+
+
+@step("its sandbox has {path} writable, with {hidden} emptied")
+def sandbox_settings(ctx, path, hidden):
+    args, path = sandbox(ctx), home_path(ctx, path)
+    assert contains_run(args, ["--bind", path, path]), f"{path} not writable in {args}"
+    for name in names(hidden):
+        assert contains_run(args, ["--tmpfs", f"{path}/{name}"]), f"{name} not emptied"
+
+
+@step("its sandbox has {path} read-only")
+def sandbox_settings_ro(ctx, path):
+    path = home_path(ctx, path)
+    assert contains_run(sandbox(ctx), ["--ro-bind", path, path]), sandbox(ctx)
+
+
+@step("its sandbox shows nothing else of the home folder")
+def sandbox_home(ctx):
+    args, home = sandbox(ctx), str(ctx.home)
+    i = args.index(home)
+    assert args[i - 2] == "--bind" and args[i - 1].startswith(str(ctx.runtime)), "home is not a throwaway folder"
+
+
+@step("its environment points it at {path}")
+def sandbox_env(ctx, path):
+    env = ctx.agent_call(ctx.agent)["env"]
+    assert home_path(ctx, path) in env.values(), env
+
+
+@step("its read tool can't fetch URLs")
+def omp_no_urls(ctx):
+    assert ctx.agent_call("omp")["overlay"] == "fetch:\n  enabled: false\n"
+
+
+@step("its inline agent may only read, list and search files")
+def opencode_read_only(ctx):
+    agent = opencode_config(ctx)["agent"]["omasudo-review"]
+    tools = ["read", "grep", "glob", "list"]
+    assert agent["tools"] == {"*": False, **{t: True for t in tools}}, agent["tools"]
+    assert agent["permission"] == {"*": "deny", **{t: "allow" for t in tools}, "external_directory": "allow"}, \
+        agent["permission"]
+
+
+# ------------------------------------------------------------------ the real sandbox
+
+@step("bubblewrap is really installed")
+def real_bwrap(ctx):
+    found = shutil.which("bwrap")
+    assert found, "these steps need bubblewrap"
+    ctx.env["OMASUDO_BWRAP"] = found
+
+
+def expand(ctx, text):
+    return home_path(ctx, text.replace("$TMP", str(ctx.tmp)).replace("$XDG_RUNTIME_DIR", str(ctx.runtime)))
+
+
+@step("these files exist:")
+def files_exist(ctx):
+    for cell in table_column(ctx):
+        path = Path(expand(ctx, cell))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("secret\n")
+
+
+@step("something in {agent}'s sandbox checks:")
+def look_around(ctx, agent):
+    # The sandbox omasudo builds for the agent, running a shell instead of it.
+    probe = r'''
+for p in "$@"; do if [ -r "$p" ]; then echo "read $p"; else echo "hidden $p"; fi; done
+for d in /etc /usr; do touch "$d/omasudo-probe" 2>/dev/null && echo "wrote $d"; done
+echo "processes $(ls /proc | grep -c '^[0-9]')"
+'''
+    code = f"""
+import sys, tempfile, os, subprocess
+sys.path.insert(0, {str(ROOT / 'bin')!r}); import jail
+with tempfile.TemporaryDirectory(prefix="omasudo-", dir=os.environ["XDG_RUNTIME_DIR"]) as wd:
+    argv = jail.wrap({agent!r}, [{agent!r}], wd, {{}})
+    argv = argv[:argv.index("--") + 1] + ["/bin/sh", "-c", {probe!r}, "sh", *sys.argv[1:]]
+    r = subprocess.run(argv, capture_output=True, text=True)
+    print(r.stdout, r.stderr, file=sys.stdout)
+"""
+    paths = [expand(ctx, c) for c in table_column(ctx)]
+    ctx.last = subprocess.run(["python3", "-I", "-c", code, *paths], env=ctx.env,
+                              capture_output=True, text=True, timeout=60)
+    assert ctx.last.returncode == 0, ctx.last.stderr
+
+
+@step("it could read:")
+def could_read(ctx):
+    for cell in table_column(ctx):
+        assert f"read {expand(ctx, cell)}" in ctx.last.stdout, ctx.last.stdout
+
+
+@step("it could not see:")
+def could_not_see(ctx):
+    for cell in table_column(ctx):
+        assert f"hidden {expand(ctx, cell)}" in ctx.last.stdout, ctx.last.stdout
+
+
+@step("it could not write to /etc or /usr")
+def could_not_write(ctx):
+    assert "wrote" not in ctx.last.stdout, ctx.last.stdout
+
+
+@step("it saw only its own processes")
+def own_processes(ctx):
+    count = int(re.search(r"processes (\d+)", ctx.last.stdout).group(1))
+    assert count < 10, ctx.last.stdout

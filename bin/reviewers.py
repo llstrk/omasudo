@@ -2,10 +2,15 @@
 
 Every reviewer gets one headless turn, saves no session, and answers with
 {"verdict", "summary", "details"}. The evidence omasudo gathers itself
-(bin/evidence.py) is in the prompt, so reviewers need no tools: Codex, pi,
-omp, opencode and Grok run with their tools switched off or denied. Claude
-keeps its read-only tools, locked down with deny rules and its sandbox, to
-look further when the evidence falls short.
+(bin/evidence.py) is in the prompt, and reviewers can look further with
+read-only tools that never see your home folder:
+
+  Claude          read-only tools, deny rules and Claude Code's own sandbox
+  pi, omp,        read, search and list files only, inside a bubblewrap
+  opencode, Grok  sandbox that shows system locations alone (bin/jail.py)
+  Codex           no tools: its only way to read is a shell
+
+Without bwrap, pi, omp, opencode and Grok run with their tools off.
 
 Claude, Codex and Grok run through omarchy-agent-account-exec when Omarchy has
 it, so a review uses the account the agents panel marks active.
@@ -14,6 +19,8 @@ import json
 import os
 import re
 import shutil
+
+import jail
 
 SUPPORTED = ["claude", "codex", "pi", "omp", "opencode", "grok"]
 ACCOUNT_PROVIDERS = {"claude", "codex", "grok"}
@@ -44,6 +51,10 @@ Answer with verdict; summary = one sentence (max ~30 words) the human reads in t
 CLAUDE_TOOLS = """
 
 You also have read-only tools to inspect this system further (man pages, unit files, package info, config files). Never try to run the requested command or any variant of it, and never use sudo/pkexec. Your tools cannot read the user's home directory, /tmp, /proc or /run/user."""
+
+READ_TOOLS = """
+
+You also have read-only file tools to look further: unit files, configs, scripts, and package file lists under /var/lib/pacman/local. Only /usr, /etc, /opt, /boot and /var/lib/pacman are visible. You cannot run commands, and man pages are compressed, so rely on the man-page entries in the evidence. When you are done, reply with only a JSON object, no other text: {"verdict": "SAFE"|"CAUTION"|"DANGEROUS", "summary": "...", "details": "..."}"""
 
 JSON_ONLY = """
 
@@ -133,35 +144,61 @@ def codex(prompt, workdir, conf):
     return argv, SYSTEM + "\n\nYou have no tools; do not try to run commands.\n\n" + prompt, parse
 
 
-def pi(prompt, workdir, conf):
+# The read-only tools each sandboxed agent gets.
+READ_ONLY = {
+    "pi": ["read", "grep", "find", "ls"],
+    "omp": ["read", "grep", "glob"],
+    "opencode": ["read", "grep", "glob", "list"],
+    "grok": ["read_file", "grep", "glob", "list_dir"],
+}
+
+
+def pi(prompt, workdir, conf, tools):
     argv = [
-        "pi", "-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-mcp",
+        "pi", "-p", "--no-session", *(["--tools", ",".join(READ_ONLY["pi"])] if tools else ["--no-tools"]),
+        "--no-extensions", "--no-skills", "--no-mcp",
         "--no-context-files", "--no-prompt-templates", "--offline",
         *(["--model", conf["model"]] if conf.get("model") else []),
         *(["--thinking", conf["effort"]] if conf.get("effort") else []),
-        "--system-prompt", SYSTEM + JSON_ONLY,
+        "--system-prompt", SYSTEM + (READ_TOOLS if tools else JSON_ONLY),
     ]
     return argv, prompt, json_in_text
 
 
-def omp(prompt, workdir, conf):
-    # oh-my-pi: pi's flags, plus its own rules, LSP and PTY switched off.
+def no_url_reads(workdir):
+    path = os.path.join(workdir, "omp-overlay.yml")
+    with open(path, "w") as f:
+        f.write("fetch:\n  enabled: false\n")
+    return path
+
+
+def omp(prompt, workdir, conf, tools):
+    # oh-my-pi: pi's flags, plus its own rules, LSP and PTY switched off. Its
+    # read tool also fetches URLs: an overlay config turns that off.
     argv = [
-        "omp", "-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-rules",
+        "omp", "-p", "--no-session",
+        *([f"--tools={','.join(READ_ONLY['omp'])}", f"--config={no_url_reads(workdir)}"] if tools else ["--no-tools"]),
+        "--no-extensions", "--no-skills", "--no-rules",
         "--no-lsp", "--no-pty", "--no-context-files", "--offline",
         *([f"--model={conf['model']}"] if conf.get("model") else []),
         *([f"--thinking={conf['effort']}"] if conf.get("effort") else []),
-        f"--system-prompt={SYSTEM + JSON_ONLY}",
+        f"--system-prompt={SYSTEM + (READ_TOOLS if tools else JSON_ONLY)}",
     ]
     return argv, prompt, json_in_text
 
 
-def opencode(prompt, workdir, conf):
+def opencode(prompt, workdir, conf, tools):
     # A private server (--standalone) with an inline agent whose tools are off
     # and whose permissions deny everything (that also covers the skill tool,
-    # which "tools" can't switch off), a throwaway database so the session
-    # never lands in your history, and no session-title call.
-    agent = {"mode": "primary", "prompt": SYSTEM + JSON_ONLY, "tools": {"*": False}, "permission": {"*": "deny"}}
+    # which "tools" can't switch off) but the read-only tools, a throwaway
+    # database so the session never lands in your history, and no
+    # session-title call. Reading outside the folder it runs in is
+    # "external_directory"; in the sandbox that is system locations only.
+    allowed = READ_ONLY["opencode"] if tools else []
+    agent = {"mode": "primary", "prompt": SYSTEM + (READ_TOOLS if tools else JSON_ONLY),
+             "tools": {"*": False, **{t: True for t in allowed}},
+             "permission": {"*": "deny", **{t: "allow" for t in allowed},
+                            **({"external_directory": "allow"} if tools else {})}}
     env = {
         "OPENCODE_CONFIG_CONTENT": json.dumps({"agent": {"omasudo-review": agent, "title": {"disable": True}}}),
         "OPENCODE_DB": os.path.join(workdir, "opencode.db"),
@@ -180,17 +217,21 @@ GROK_OFF = ["run_terminal_cmd", "task", "Agent", "web_search", "web_fetch", "wri
             "read_file", "grep", "glob", "list_dir", "image_gen", "monitor", "workflow"]
 
 
-def grok(prompt, workdir, conf):
-    # Grok Build: every built-in tool removed, no subagents, memory or web.
-    # Its strict/read-only sandboxes refuse to start where /run/podman is
-    # unreadable, so it runs under "workspace" (writes: this temp folder,
-    # ~/.grok, /tmp). Grok saves the session under ~/.grok/sessions.
+def grok(prompt, workdir, conf, tools):
+    # Grok Build: only the read-only tools (or none), no subagents, memory or
+    # web. In bubblewrap, Grok's own sandbox is off: it would nest a second
+    # bwrap. Without, its strict/read-only sandboxes refuse to start where
+    # /run/podman is unreadable, so it runs under "workspace" with no tools,
+    # and saves the session under ~/.grok/sessions (in bubblewrap that is the
+    # throwaway home).
     path = os.path.join(workdir, "prompt.txt")
     with open(path, "w") as f:
         f.write(prompt)
     argv = [
-        "grok", "--prompt-file", path, "--system-prompt-override", SYSTEM,
-        "--sandbox", "workspace", "--disallowed-tools", ",".join(GROK_OFF),
+        "grok", "--prompt-file", path, "--system-prompt-override", SYSTEM + (READ_TOOLS if tools else ""),
+        "--sandbox", "off" if tools else "workspace",
+        *(["--tools", ",".join(READ_ONLY["grok"])] if tools else []),
+        "--disallowed-tools", ",".join(t for t in GROK_OFF if not tools or t not in READ_ONLY["grok"]),
         "--disable-web-search", "--no-subagents", "--no-plan", "--no-ask-user", "--no-memory",
         "--no-auto-update", "--permission-mode", "dontAsk",
         *(["-m", conf["model"]] if conf.get("model") else []),
@@ -218,5 +259,13 @@ BUILD = {"claude": claude, "codex": codex, "pi": pi, "omp": omp, "opencode": ope
 
 def build(name, prompt, workdir, conf):
     """argv, stdin text, parse(stdout) -> dict, extra environment."""
+    if name in READ_ONLY:
+        tools = jail.available()
+        argv, stdin, parse, *env = BUILD[name](prompt, workdir, conf or {}, tools)
+        env = env[0] if env else {}
+        if tools:
+            # Grok's account is picked by jail.py (GROK_HOME), not account exec.
+            return jail.wrap(name, argv, workdir, env), stdin, parse, {}
+        return with_account(name, argv), stdin, parse, env
     argv, stdin, parse, *env = BUILD[name](prompt, workdir, conf or {})
     return with_account(name, argv), stdin, parse, (env[0] if env else {})

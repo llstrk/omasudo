@@ -29,8 +29,6 @@ OMARCHY_DEFAULT = Path.home() / ".config/omarchy/defaults/agent"
 KNOWN = ["pi", "omp", "opencode", "ori", "claude", "codex", "grok", "openclaw", "agy", "hermes", "copilot",
          "crush", "cursor-agent", "muse", "kimi", "qwen", "dsh", "mcode", "kiro-cli", "freebuff", "kilo",
          "devin", "amp", "commandcode"]
-NONE = "No AI review (show the command only)"
-NO_FALLBACK = "No fallback"
 
 
 def known_agents():
@@ -125,64 +123,110 @@ def save(names):
     os.replace(tmp, CONFIG)
 
 
+# Colours by terminal palette number, so they follow the Omarchy theme.
+ACCENT, GOOD, WARN, MUTED = 4, 2, 3, 7  # 8 (bright black) is unreadable in some themes
+DELIM = "\x1f"  # between a gum option's label and the value it prints
+
+
+def paint(text, colour=None, bold=False):
+    codes = (["1"] if bold else []) + ([str(30 + colour if colour < 8 else 82 + colour)] if colour is not None else [])
+    return f"\033[{';'.join(codes)}m{text}\033[0m" if codes else text
+
+
+BADGE = "\033[1;30;44m omasudo \033[0m"  # black on the theme's blue
+
+
+def screen(*lines):
+    """Starts a fresh screen: omasudo's title, then lines, indented."""
+    if sys.stdout.isatty():
+        sys.stdout.write("\033[H\033[2J")
+    print()
+    print("  " + BADGE + "  who reviews root requests from agents")
+    print()
+    for line in lines:
+        print("  " + line if line else "")
+    sys.stdout.flush()
+
+
 def gum_choose(header, options, selected=None):
-    args = ["gum", "choose", "--header", header]
+    """options: [(label, value)]; returns the chosen value, None on Esc."""
+    # Omarchy's GUM_CHOOSE_* variables theme the rest.
+    args = ["gum", "choose", "--header", "  " + header, "--label-delimiter", DELIM, "--cursor", "  › "]
     if selected:
         args += ["--selected", selected]
-    p = subprocess.run(args + options, stdout=subprocess.PIPE, text=True)
+    p = subprocess.run(args + [f"{label}{DELIM}{value}" for label, value in options], stdout=subprocess.PIPE, text=True)
     return p.stdout.strip() if p.returncode == 0 else None
+
+
+def option(a, width):
+    """An agent as a picker row: name, then a dot and what Omarchy knows."""
+    ready = a["signedIn"] is not False
+    status = paint("●", GOOD) + " " + ("signed in" if a["signedIn"] else "installed") if ready \
+        else paint("○ not signed in", WARN)
+    extra = paint("  Omarchy default", ACCENT) if a["default"] else ""
+    return f"{paint(a['name'].ljust(width), bold=ready)}  {status}{extra}"
 
 
 def pick():
     found = discover()
     usable = [a for a in found if a["supported"]]
-    width = max([len(a["name"]) for a in found] + [6])
-    lines = ["Choose who reviews agent requests", ""]
-    if found:
-        lines.append("Agents found on this machine:")
-        lines += [f"  {a['name']:<{width}}  {describe(a)}" for a in found]
-    else:
-        lines.append("No coding agents found on this machine.")
+    unsupported = [a["name"] for a in found if not a["supported"]]
+    width = max([len(a["name"]) for a in usable] + [6])
     default = next((a for a in found if a["default"]), None)
-    if default and not default["supported"]:
-        lines += ["", f"Your default agent, {default['name']}, can't review yet; pick another."]
-    lines += [
-        "",
-        "The reviewer gets the command, its process chain, and evidence omasudo",
-        "gathers here (man-page entries, unit files, named scripts; secrets",
-        "redacted). Other agents run with their tools off; Claude keeps",
-        "read-only tools that cannot read your home folder.",
-    ]
-    subprocess.run(["gum", "style", "--border", "rounded", "--padding", "1 2", "--width", "78", *lines])
-    print()
 
-    labels = {f"{a['name']} ({describe(a)})": a["name"] for a in usable}
-    first_label = next((l for l, n in labels.items() if default and n == default["name"]), None)
-    if not first_label:
-        first_label = next((l for l, n in labels.items() if "not signed in" not in l), None)
-    choice = gum_choose("Review agent requests with:", list(labels) + [NONE], first_label)
+    intro = [
+        "Before you type your password for an agent, a second agent reads the",
+        "command and tells you what it will really do. It never sees your home folder.",
+        "",
+    ]
+    notes = []
+    if default and not default["supported"]:
+        notes.append(paint(f"Your default agent, {default['name']}, can't review yet.", WARN))
+    if unsupported:
+        notes.append(paint("Also installed, not supported yet: " + ", ".join(unsupported), MUTED))
+    if not usable:
+        notes.append(paint("No supported agent found: install one of " + ", ".join(reviewers.SUPPORTED), WARN))
+    screen(*intro, *notes, *([""] if notes else []))
+
+    rows = [(option(a, width), a["name"]) for a in usable]
+    rows.append((f"{paint('No AI review', bold=True)}  {paint('just show the command', MUTED)}", "none"))
+    start = next((l for l, n in rows if default and n == default["name"]), None) \
+        or next((option(a, width) for a in usable if a["signedIn"] is not False), None)
+    choice = gum_choose("Review with", rows, start)
     if choice is None:
-        print("Nothing changed; asking again next time the shell starts.")
+        print("  Nothing changed; asking again next time the shell starts.")
         return 0  # not an error: Omarchy's terminal would show "failed"
-    if choice == NONE:
+    change = paint(f"Change it any time: {pretty_path()} reviewer", MUTED)
+    if choice == "none":
         save([])
-        print("No AI review: the dialog shows the command only.")
-        print(f"To choose a reviewer later: {os.path.dirname(os.path.abspath(__file__))}/omasudo reviewer")
+        screen(paint("✓", GOOD) + " No AI review: the dialog shows the command only.", "", change)
         return 0
 
-    chosen = [labels[choice]]
+    chosen = [choice]
     while True:
-        rest = [l for l, n in labels.items() if n not in chosen]
+        rest = [(l, n) for l, n in rows[:-1] if n not in chosen]
         if not rest:
             break
-        nxt = gum_choose(f"If {chosen[-1]} can't answer, fall back to:", [NO_FALLBACK] + rest)
-        if nxt is None or nxt == NO_FALLBACK:
+        screen("Reviews  " + order(chosen) + paint("  → …", MUTED), "",
+               f"A fallback is asked when {chosen[-1]} can't answer: offline, out of quota or too slow.", "")
+        nxt = gum_choose(f"If {chosen[-1]} can't answer, fall back to", [(paint("No fallback", bold=True), "none")] + rest)
+        if nxt is None or nxt == "none":
             break
-        chosen.append(labels[nxt])
+        chosen.append(nxt)
     save(chosen)
-    print("Reviews: " + " → ".join(chosen))
-    print(f"Change with: {os.path.dirname(os.path.abspath(__file__))}/omasudo reviewer")
+    screen(paint("✓ Saved", GOOD, bold=True), "", "Reviews  " + order(chosen), "", change)
+    print()
     return 0
+
+
+def order(names):
+    return paint(" → ", MUTED).join(paint(n, bold=True) for n in names)
+
+
+def pretty_path():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omasudo")
+    home = str(Path.home())
+    return "~" + path[len(home):] if path.startswith(home + "/") else path
 
 
 def main():

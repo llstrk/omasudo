@@ -6,7 +6,8 @@ Feature: Choosing who reviews agent requests
 
   The steps run the real bin/omasudo in a throwaway home. Omarchy's commands,
   gum, mise and the coding agents are fakes; choosing in the picker is
-  answering gum's prompts.
+  answering gum's prompts. Options read as they do on screen, without colour:
+  "●" is ready to use, "○" is not signed in.
 
   Background:
     Given the polkit rule is installed
@@ -21,34 +22,28 @@ Feature: Choosing who reviews agent requests
 
   Rule: The picker lists what is on this machine
 
-    Scenario: Every installed agent is listed, with what Omarchy knows about it
-      When I run "omasudo reviewer" and press Esc
-      Then the picker lists the agents:
-        | agent    | status                         |
-        | pi       | Omarchy default, installed     |
-        | claude   | signed in                      |
-        | opencode | installed                      |
-        | hermes   | installed, not supported yet   |
-        | codex    | not signed in                  |
-
-    Scenario: Only supported agents can be picked
+    Scenario: Every supported agent can be picked, with what Omarchy knows about it
       When I run "omasudo reviewer" and press Esc
       Then the first question offers:
-        | pi (Omarchy default, installed) |
-        | claude (signed in)              |
-        | opencode (installed)            |
-        | codex (not signed in)           |
-        | No AI review (show the command only) |
+        | pi ● installed Omarchy default     |
+        | claude ● signed in                 |
+        | opencode ● installed               |
+        | codex ○ not signed in              |
+        | No AI review just show the command |
+
+    Scenario: Installed agents that can't review are named
+      When I run "omasudo reviewer" and press Esc
+      Then the picker says "Also installed, not supported yet: hermes"
 
     Scenario: The picker starts on Omarchy's default agent
       When I run "omasudo reviewer" and press Esc
-      Then the first question starts on "pi (Omarchy default, installed)"
+      Then the first question starts on "pi ● installed Omarchy default"
 
     Scenario: An unsupported default agent is named, and the picker starts on a signed-in agent
       Given Omarchy's default agent is "hermes"
       When I run "omasudo reviewer" and press Esc
-      Then the picker says "Your default agent, hermes, can't review yet; pick another."
-      And the first question starts on "claude (signed in)"
+      Then the picker says "Your default agent, hermes, can't review yet."
+      And the first question starts on "claude ● signed in"
 
     Scenario: An agent mise only declares is not listed
       Given "omp" is only a mise shim
@@ -59,25 +54,25 @@ Feature: Choosing who reviews agent requests
 
     Scenario: A reviewer with fallbacks
       When I run "omasudo reviewer" and choose:
-        | pi (Omarchy default, installed) |
-        | claude (signed in)              |
-        | No fallback                     |
+        | pi          |
+        | claude      |
+        | No fallback |
       Then the config has the reviewers "pi, claude"
-      And it prints "Reviews: pi → claude"
+      And it prints "Reviews pi → claude"
 
     Scenario: Fallbacks are asked one at a time, without the ones already chosen
       When I run "omasudo reviewer" and choose:
-        | claude (signed in)              |
-        | No fallback                     |
-      Then the second question is "If claude can't answer, fall back to:" and offers:
-        | No fallback                     |
-        | pi (Omarchy default, installed) |
-        | opencode (installed)            |
-        | codex (not signed in)           |
+        | claude      |
+        | No fallback |
+      Then the second question is "If claude can't answer, fall back to" and offers:
+        | No fallback                    |
+        | pi ● installed Omarchy default |
+        | opencode ● installed           |
+        | codex ○ not signed in          |
 
     Scenario: No AI review
       When I run "omasudo reviewer" and choose:
-        | No AI review (show the command only) |
+        | No AI review |
       Then the config has no reviewers
       And it prints "No AI review: the dialog shows the command only."
 
@@ -111,7 +106,7 @@ Feature: Choosing who reviews agent requests
 
     Scenario: With the rule installed, setup goes straight to the picker
       When I run "omasudo setup --prompted" and choose:
-        | claude (signed in) |
-        | No fallback        |
+        | claude      |
+        | No fallback |
       Then setup did not offer the polkit rule
       And the config has the reviewers "claude"

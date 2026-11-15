@@ -55,13 +55,14 @@ see the command only.
 |---|---|
 | Claude Code | `claude -p`, Opus at low effort, read-only tools (see below) |
 | Codex | `codex exec --ephemeral`, read-only sandbox, shell/web/image/app tools off |
-| pi | `pi -p --no-session --no-tools`, your default pi model |
-| omp | `omp -p --no-session --no-tools`, rules/LSP/PTY off, your default model |
-| opencode | `opencode run --standalone` with an inline agent: tools off, every permission denied, throwaway database, your default model |
-| Grok | `grok --prompt-file`, every built-in tool removed, no subagents, memory or web |
+| pi | `pi -p --no-session`, read/grep/find/ls only, in bubblewrap (see below), your default pi model |
+| omp | `omp -p --no-session`, read/grep/glob only with URL reads off, rules/LSP/PTY off, in bubblewrap, your default model |
+| opencode | `opencode run --standalone` with an inline agent that may only read, search and list, throwaway database, in bubblewrap, your default model |
+| Grok | `grok --prompt-file`, read_file/grep/glob/list_dir only, no subagents, memory or web, in bubblewrap |
 
-Claude Code, Codex and Grok run through `omarchy-agent-account-exec`, so
-reviews use the account the agents panel marks active. Agents omasudo can't drive yet are
+Claude Code, Codex and Grok use the account the agents panel marks active
+(Claude Code and Codex through `omarchy-agent-account-exec`; Grok gets the
+account's folder in its sandbox). Agents omasudo can't drive yet are
 listed but can't be picked.
 
 ```sh
@@ -124,7 +125,8 @@ package, the man-page entries for exactly the subcommands and flags it was
 given, flags the man page doesn't document, and the state and unit file of any
 systemd unit it names. For `systemctl preset-all --dry-run` that includes the
 `--dry-run` entry saying it only applies to halt, poweroff, reboot and the
-like. So reviewers need no tools, and a fast model sees the trap too.
+like. So a fast model sees the trap too, and reviewers only need tools to
+look further: read-only ones, which never see your home folder.
 
 ## Privacy and safety
 
@@ -132,21 +134,39 @@ like. So reviewers need no tools, and a fast model sees the trap too.
   (`--no-session-persistence`, `--ephemeral`, `--no-session`), run in an empty
   temporary folder, and the plugin never logs commands or verdicts (shell
   output goes to the journal). opencode gets a throwaway database, so the
-  review never shows in its history. Grok is the exception: it always saves
-  the session under `~/.grok/sessions`. The request reaches the reviewer on
-  stdin (Grok: a file in the private temporary folder), not in its command
-  line.
+  review never shows in its history. Grok always saves its session, so in
+  bubblewrap its sessions folder is an empty, throwaway one (without
+  bubblewrap, the session lands in `~/.grok/sessions`). The request reaches
+  the reviewer on stdin (Grok: a file in the private temporary folder), not in
+  its command line.
 - Obvious secrets are blanked before anything is sent: password/token flags,
   `*_TOKEN=` assignments, auth headers, `user:pass@` URLs, well-known token
   formats and long hex/base64 strings. This is best-effort; the command still
   goes to the reviewer's provider (for pi, whatever its model is).
-- The other reviewers get no usable tools. pi and omp run with `--no-tools`
-  and without extensions, skills, MCP or context files. Codex runs with its
-  shell, web, image and app tools disabled, MCP servers cleared and its
-  read-only sandbox. opencode still offers its `skill` tool, but its agent
-  denies every permission, so a skill load is refused. Grok runs with every
-  built-in tool removed, under its `workspace` sandbox (its stricter profiles
-  refuse to start where `/run/podman` is unreadable).
+- pi, omp, opencode and Grok can read, search and list files, and nothing
+  else: no shell, no edits, no web, no subagents; pi and omp also run without
+  extensions, skills, MCP or context files, and omp's read tool, which can
+  fetch URLs, has that switched off. opencode still offers its `skill` tool,
+  but its agent denies every permission but reading, so a skill load is
+  refused. None of these CLIs can limit *which* files their tools read, so
+  they run in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox
+  (`bin/jail.py`) that shows:
+  - `/usr`, `/etc`, `/opt`, `/boot` and `/var/lib/pacman`, read-only;
+  - an empty, throwaway home folder holding only the agent's install and its
+    own settings folder, with its sessions and logs swapped for empty
+    folders. That folder stays writable, so a sign-in the agent refreshes
+    during a review is kept. It also means the reviewer can read the agent's
+    own settings and sign-in, but no other file of yours;
+  - an empty `/tmp`, no `/run/user` (no session bus, SSH or GPG agent), and
+    only its own processes.
+
+  The environment is cleared down to locale, proxy and provider variables
+  (`*_API_KEY`, `*_BASE_URL`, …). The sandbox keeps the network, since the
+  agent has to reach its model. Without `bwrap` these four run with their
+  tools off instead.
+- Codex gets no tools: its only way to read is a shell, and a shell could do
+  more than read. It runs with its shell, web, image and app tools disabled,
+  MCP servers cleared and its read-only sandbox.
 - Claude Code loads none of your settings, MCP servers or hooks.
   Its tools are Read/Grep/Glob plus an allowlist of read-only commands (`man`,
   `systemctl cat/show/status`, `pacman -Q*`, `cat`, `grep`, …). It cannot read
@@ -201,12 +221,14 @@ executable:
 
 - `choosing.feature`: picking reviewers and fallbacks
 - `reviewing.feature`: evidence, fallbacks, what leaves the machine
-- `lockdown.feature`: how each agent is run
+- `lockdown.feature`: how each agent is run, and its sandbox
 
 A small standard-library runner (`tests/gherkin.py`) runs them against the
 real `bin/omasudo` and `bin/review.py`. gum, mise, Omarchy's commands and the
 coding agents are replaced by fakes (`tests/fakebin.py`) that record how they
-were called. Evidence comes from this machine's real man pages.
+were called, and so is bubblewrap, except in one scenario that runs the real
+`bwrap` and checks what can be read inside it. Evidence comes from this
+machine's real man pages.
 
 ```sh
 python3 tests/gherkin.py                 # every step with its result

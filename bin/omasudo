@@ -78,50 +78,53 @@ setup() {
   if ! agents configured; then
     agents pick
   elif [[ ${1:-} != --prompted ]]; then
-    echo "Reviews: $(reviewers_state | sed 's/,/ → /g'). Change with: $here/bin/omasudo reviewer"
+    echo "  Reviews: $(reviewers_state | sed 's/,/ → /g'). Change with: $here/bin/omasudo reviewer"
   fi
 }
 
 rule_step() {
   local rule=$1
-  local title="Finish setting up Omasudo"
-  [[ $rule == outdated ]] && title="Update Omasudo's polkit rule"
+  local title="One step first: a polkit rule"
+  [[ $rule == outdated ]] && title="The polkit rule needs an update"
+  # The picker's look (bin/agents.py): a badge in the theme's blue, then text.
+  local bold=$'\e[1m' off=$'\e[0m' badge=$'\e[1;30;44m omasudo \e[0m'
 
-  local body=(
-    "To show which program asked for root, including systemctl and other"
-    "D-Bus requests (not just pkexec), Omasudo installs a polkit rule:"
-    ""
-    "  $RULE"
-    "  $HELPER"
-    "  $DROPIN"
-    "  $UNINSTALLER (and the rule's hash next to it)"
-    ""
-    "It notes the requesting PID per action in /run/polkit-subject (tmpfs),"
-    "never command lines, and makes no authorization decision."
+  [[ -t 1 ]] && printf '\e[H\e[2J'
+  printf '\n  %s  %s\n\n' "$badge" "$bold$title$off"
+  printf '  %s\n' \
+    "To show which program asked for root, for systemctl and other D-Bus" \
+    "requests too (not just pkexec), omasudo installs a polkit rule. It notes" \
+    "the requesting PID per action in /run/polkit-subject (tmpfs), never" \
+    "command lines, and makes no authorization decision." \
+    "" \
+    "  $RULE" \
+    "  $HELPER" \
+    "  $DROPIN" \
+    "  $UNINSTALLER, and the rule's hash" \
+    "" \
     "polkitd restarts once; the dialog reconnects by itself."
-  )
-  gum style --border rounded --padding "1 2" --width 78 "$title" "" "${body[@]}"
   echo
 
   local choice
-  choice=$(gum choose "Set it up (asks for your password)" "Not now" "Don't ask again") || choice="Not now"
+  choice=$(gum choose --cursor "  › " --header "  Install it?" \
+    "Set it up (asks for your password)" "Not now" "Don't ask again") || choice="Not now"
   case $choice in
     Set*)
       if sudo "$here/system/install.sh"; then
         rm -f "$declined"
         echo
-        echo "Done. Requests now show the requesting command, for D-Bus callers too."
+        echo "  Done. Requests now show the requesting command, for D-Bus callers too."
       else
-        echo "Setup failed; nothing else was changed. Retry with: $here/bin/omasudo setup" >&2
+        echo "  Setup failed; nothing else was changed. Retry with: $here/bin/omasudo setup" >&2
         return 1
       fi
       ;;
     Don*)
       mkdir -p "$state_dir" && : > "$declined"
-      echo "Won't ask again. To set up later, run: $here/bin/omasudo setup"
+      echo "  Won't ask again. To set up later, run: $here/bin/omasudo setup"
       ;;
     *)
-      echo "Asking again next time the shell starts."
+      echo "  Asking again next time the shell starts."
       ;;
   esac
 }
