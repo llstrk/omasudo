@@ -155,7 +155,18 @@ def gum_choose(header, options, selected=None):
     if selected:
         args += ["--selected", selected]
     p = subprocess.run(args + [f"{label}{DELIM}{value}" for label, value in options], stdout=subprocess.PIPE, text=True)
-    return p.stdout.strip() if p.returncode == 0 else None
+    if p.returncode != 0:
+        erase_gum_line()
+        return None
+    return p.stdout.strip()
+
+
+def erase_gum_line():
+    """On Esc gum leaves "nothing selected" under the screen (on stderr, where
+    it also draws, so it can't be silenced); our own message replaces it."""
+    if sys.stderr.isatty():
+        sys.stderr.write("\033[1A\033[2K")
+        sys.stderr.flush()
 
 
 def option(a, width):
@@ -190,13 +201,17 @@ def pick():
 
     rows = [(option(a, width), a["name"]) for a in usable]
     rows.append((f"{paint('No AI review', bold=True)}  {paint('just show the command', MUTED)}", "none"))
-    start = next((l for l, n in rows if default and n == default["name"]), None) \
+    # The current choice when there is one, else Omarchy's default agent.
+    current = load().get("reviewers")
+    configured = isinstance(current, list)
+    first = (current[0] if current else "none") if configured else (default["name"] if default else None)
+    start = next((l for l, n in rows if n == first), None) \
         or next((option(a, width) for a in usable if a["signedIn"] is not False), None)
     choice = gum_choose("Review with", rows, start)
     if choice is None:
-        print("  Nothing changed; asking again next time the shell starts.")
+        print("  Nothing changed." if configured else "  Nothing changed; asking again next time the shell starts.")
         return 0  # not an error: Omarchy's terminal would show "failed"
-    change = paint(f"Change it any time: {pretty_path()} reviewer", MUTED)
+    change = paint(f"Change it any time: run {pretty_path()}", MUTED)
     if choice == "none":
         save([])
         screen(paint("✓", GOOD) + " No AI review: the dialog shows the command only.", "", change)

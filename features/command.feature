@@ -29,7 +29,7 @@ Feature: The omasudo command
       When I run "omasudo reviewer" and choose:
         | claude      |
         | No fallback |
-      Then it prints "Change it any time: omasudo reviewer"
+      Then it prints "Change it any time: run omasudo"
 
   Rule: It never replaces what isn't its own
 

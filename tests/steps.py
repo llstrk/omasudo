@@ -420,6 +420,17 @@ def no_terminal(ctx):
     assert ctx.last.returncode == 0, ctx.output()
 
 
+@step("setup offered the polkit rule")
+def rule_offered(ctx):
+    offered = [o for q in questions(ctx) for o in q["options"]]
+    assert any(o.startswith("Set it up") for o in offered), offered
+
+
+@step("the config has no choice yet")
+def no_choice(ctx):
+    assert "reviewers" not in ctx.read_config(), ctx.read_config()
+
+
 @step("setup did not offer the polkit rule")
 def rule_not_offered(ctx):
     offered = [o for q in questions(ctx) for o in q["options"]]

@@ -95,13 +95,40 @@ Feature: Choosing who reviews agent requests
       Given the config has the reviewers "claude"
       When I run "omasudo reviewer" and press Esc
       Then the config has the reviewers "claude"
-      And it prints "Nothing changed; asking again next time the shell starts."
+      And it prints "Nothing changed."
       And it ends without an error
+
+    Scenario: Esc before anything is chosen asks again later
+      When I run "omasudo reviewer" and press Esc
+      Then the config has no choice yet
+      And it prints "Nothing changed; asking again next time the shell starts."
 
     Scenario: Status shows the choice
       Given the config has the reviewers "pi, claude"
       When I run "omasudo status"
       Then it prints "reviewers=pi,claude"
+
+  Rule: Running omasudo opens setup
+
+    Scenario: The picker opens on the current reviewer
+      Given the config has the reviewers "claude, pi"
+      When I run "omasudo" and press Esc
+      Then the first question starts on "claude ● signed in"
+      And setup did not offer the polkit rule
+
+    Scenario: After "No AI review", it opens there
+      Given the config has no reviewers
+      When I run "omasudo" and press Esc
+      Then the first question starts on "No AI review just show the command"
+
+    Scenario: Without the polkit rule, it is offered first
+      Given the polkit rule is not installed
+      When I run "omasudo" and choose:
+        | Not now     |
+        | claude      |
+        | No fallback |
+      Then setup offered the polkit rule
+      And the config has the reviewers "claude"
 
   Rule: Setup asks once, when the dialog loads and nothing is chosen yet
 

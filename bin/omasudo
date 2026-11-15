@@ -1,7 +1,8 @@
 #!/bin/bash
 # Omasudo setup. The dialog makes this the `omasudo` command (~/.local/bin).
+#   omasudo               set up: the polkit rule if it is missing, then who
+#                         reviews (same as omasudo setup; needs a terminal)
 #   omasudo status        rule, reviewers and setup state
-#   omasudo setup         install the polkit rule and choose reviewers (needs a terminal)
 #   omasudo setup --auto  the dialog's call when it loads: add the omasudo
 #                         command, and ask in a floating terminal if the rule
 #                         or the reviewer choice is missing
@@ -118,7 +119,8 @@ reviewers_state() {
 }
 
 # setup [--prompted]: --prompted (from setup --auto) skips a rule step the
-# user declined; run by hand, setup offers the rule again.
+# user declined and asks who reviews only if nobody chose yet; run by hand,
+# setup offers the rule again and always opens the picker.
 setup() {
   mkdir -p "$state_dir"
   exec 9>"$lock"
@@ -128,17 +130,14 @@ setup() {
   fi
   local rule=$(rule_state)
   if [[ $rule == installed ]]; then
-    [[ ${1:-} == --prompted ]] || echo "The polkit rule is installed."
+    :
   elif [[ ${1:-} == --prompted && -e $declined ]]; then
     :
   else
     rule_step "$rule" || return 1
   fi
-  echo
-  if ! agents configured; then
+  if [[ ${1:-} != --prompted ]] || ! agents configured; then
     agents pick
-  elif [[ ${1:-} != --prompted ]]; then
-    echo "  Reviews: $(reviewers_state | sed 's/,/ → /g'). Change with: $(me) reviewer"
   fi
 }
 
@@ -167,7 +166,10 @@ rule_step() {
 
   local choice
   choice=$(gum choose --cursor "  › " --header "  Install it?" \
-    "Set it up (asks for your password)" "Not now" "Don't ask again") || choice="Not now"
+    "Set it up (asks for your password)" "Not now" "Don't ask again") || {
+    choice="Not now"
+    [[ -t 2 ]] && printf '\e[1A\e[2K' >&2  # gum's "nothing selected"; ours follows
+  }
   case $choice in
     Set*)
       if sudo "$here/system/install.sh"; then
@@ -175,13 +177,13 @@ rule_step() {
         echo
         echo "  Done. Requests now show the requesting command, for D-Bus callers too."
       else
-        echo "  Setup failed; nothing else was changed. Retry with: $(me) setup" >&2
+        echo "  Setup failed; nothing else was changed. Retry with: $(me)" >&2
         return 1
       fi
       ;;
     Don*)
       mkdir -p "$state_dir" && : > "$declined"
-      echo "  Won't ask again. To set up later, run: $(me) setup"
+      echo "  Won't ask again. To set up later, run: $(me)"
       ;;
     *)
       echo "  Asking again next time the shell starts."
@@ -189,7 +191,10 @@ rule_step() {
   esac
 }
 
-case ${1:-status} in
+case ${1:-setup} in
+  -h|--help|help)
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
   status)
     echo "rule=$(rule_state)"
     echo "reviewers=$(reviewers_state)"
@@ -222,7 +227,7 @@ case ${1:-status} in
     if [[ -x $UNINSTALLER ]]; then sudo "$UNINSTALLER"; else sudo "$here/system/uninstall.sh"; fi
     ;;
   *)
-    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

@@ -38,7 +38,7 @@ When the dialog loads it also adds the `omasudo` command:
 that runs another omasudo checkout that still exists (except that the copy
 Omarchy installed takes over from a development checkout).
 
-Setting up (or running `omasudo setup`) installs a small polkit rule: `/etc/polkit-1/rules.d/00-subject-note.rules`,
+Setting up installs a small polkit rule: `/etc/polkit-1/rules.d/00-subject-note.rules`,
 its helper `/usr/local/lib/polkit-subject-note`, a polkitd drop-in that gives
 it a tmpfs folder, and a root-owned copy of the uninstaller. polkitd restarts
 once; the dialog notices and registers again within a few seconds.
@@ -71,7 +71,8 @@ account's folder in its sandbox). Agents omasudo can't drive yet are
 listed but can't be picked.
 
 ```sh
-omasudo reviewer   # choose again
+omasudo            # set up again: the polkit rule if missing, then who reviews
+omasudo reviewer   # only who reviews
 omasudo agents     # what was found
 omasudo status     # rule state, reviewers, whether setup was declined
 ```
