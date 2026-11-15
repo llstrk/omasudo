@@ -17,13 +17,17 @@ declined=$state_dir/setup-declined
 # then a shell restart) does not open another one.
 lock=$state_dir/setup.lock
 
-RULE=/etc/polkit-1/rules.d/00-subject-note.rules
-HELPER=/usr/local/lib/polkit-subject-note
-DROPIN=/etc/systemd/system/polkit.service.d/subject-note.conf
-UNINSTALLER=/usr/local/lib/omasudo/uninstall.sh
+# OMASUDO_SYSTEM_ROOT prefixes the system paths status reads; the feature
+# tests point it at a throwaway folder. Unset, they are the real ones.
+sysroot=${OMASUDO_SYSTEM_ROOT:-}
+RULE=$sysroot/etc/polkit-1/rules.d/00-subject-note.rules
+HELPER=$sysroot/usr/local/lib/polkit-subject-note
+DROPIN=$sysroot/etc/systemd/system/polkit.service.d/subject-note.conf
+UNINSTALLER=$sysroot/usr/local/lib/omasudo/uninstall.sh
 # rules.d is readable only by root and polkitd, so install.sh records the
 # installed rule's hash here for status to compare.
-RULE_SUM=/usr/local/lib/omasudo/rule.sha256
+RULE_SUM=$sysroot/usr/local/lib/omasudo/rule.sha256
+NOTES=$sysroot/run/polkit-subject
 
 rule_state() {
   if [[ ! -e $HELPER && ! -e $DROPIN && ! -e $UNINSTALLER ]]; then
@@ -32,7 +36,7 @@ rule_state() {
     && cmp -s "$here/system/polkit-subject-note" "$HELPER" \
     && cmp -s "$here/system/subject-note.conf" "$DROPIN" \
     && cmp -s "$here/system/uninstall.sh" "$UNINSTALLER" \
-    && [[ -d /run/polkit-subject ]]; then
+    && [[ -d $NOTES ]]; then
     echo installed
   else
     echo outdated

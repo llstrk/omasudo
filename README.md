@@ -194,6 +194,28 @@ automatically. After an Omarchy update, compare with the stock plugin:
 diff -u /usr/share/omarchy/shell/plugins/polkit/PolkitAgent.qml PolkitAgent.qml
 ```
 
+## Specs
+
+The behaviour is specified in Gherkin under `features/` and the specs are
+executable:
+
+- `choosing.feature`: picking reviewers and fallbacks
+- `reviewing.feature`: evidence, fallbacks, what leaves the machine
+- `lockdown.feature`: how each agent is run
+
+A small standard-library runner (`tests/gherkin.py`) runs them against the
+real `bin/omasudo` and `bin/review.py`. gum, mise, Omarchy's commands and the
+coding agents are replaced by fakes (`tests/fakebin.py`) that record how they
+were called. Evidence comes from this machine's real man pages.
+
+```sh
+python3 tests/gherkin.py                 # every step with its result
+python3 -m unittest discover -s tests    # one test per scenario
+```
+
+The lockdown scenarios pin each agent's command line. Whether each CLI honours
+those flags was checked against the real binaries, not here.
+
 ## Uninstall
 
 ```sh

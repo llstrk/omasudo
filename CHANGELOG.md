@@ -4,6 +4,7 @@
 - Choose the reviewer: Claude Code, Codex, pi, omp, opencode or Grok, with fallbacks in order, or no AI review. Setup lists the agents it finds, marks the Omarchy default and which are signed in, and starts on the default. `bin/omasudo reviewer` chooses again; `bin/omasudo agents` lists them. Existing installs are asked once.
 - Evidence first: man-page entries for the given subcommands and flags, packages and unit files go into the prompt, so the other reviewers run with their tools off and Claude answers faster.
 - Claude Code, Codex and Grok use the account Omarchy's agents panel marks active.
+- Executable specs in Gherkin (`features/`, run by `tests/gherkin.py`), as in omaprofile.
 - The dialog names the agent that answered. `OMASUDO_MODEL`/`OMASUDO_EFFORT` are replaced by `agents` in `~/.config/omasudo/config.json`.
 
 ## 0.4.0
