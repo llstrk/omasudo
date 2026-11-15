@@ -191,6 +191,10 @@ def pick():
         "",
     ]
     notes = []
+    # The polkit rule step's outcome (bin/omasudo), cleared off screen by now.
+    kind, _, text = os.environ.get("OMASUDO_NOTE", "").partition(":")
+    if text:
+        intro = [paint("✓ " + text, GOOD) if kind == "ok" else paint(text, MUTED), ""] + intro
     if default and not default["supported"]:
         notes.append(paint(f"Your default agent, {default['name']}, can't review yet.", WARN))
     if unsupported:

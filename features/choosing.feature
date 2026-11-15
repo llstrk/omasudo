@@ -130,6 +130,22 @@ Feature: Choosing who reviews agent requests
       Then setup offered the polkit rule
       And the config has the reviewers "claude"
 
+    Scenario: The picker says the polkit rule was installed
+      Given the polkit rule is not installed
+      When I run "omasudo" and choose:
+        | Set it up   |
+        | claude      |
+        | No fallback |
+      Then the picker says "✓ Polkit rule installed"
+
+    Scenario: The picker says how to set up the polkit rule later
+      Given the polkit rule is not installed
+      When I run "omasudo" and choose:
+        | Don't ask again |
+        | claude          |
+        | No fallback     |
+      Then the picker says "No polkit rule. To set it up later, run"
+
   Rule: Setup asks once, when the dialog loads and nothing is chosen yet
 
     Scenario: Nothing chosen yet

@@ -176,9 +176,14 @@ setup() {
     rule_step "$rule" || return 1
   fi
   if [[ ${1:-} != --prompted ]] || ! agents configured; then
-    agents pick
+    # The picker clears the screen, so it shows the rule step's outcome.
+    OMASUDO_NOTE=$rule_note agents pick
   fi
 }
+
+# What the rule step did, for the picker's first screen: "ok:<text>" or
+# "info:<text>".
+rule_note=""
 
 rule_step() {
   local rule=$1
@@ -213,6 +218,7 @@ rule_step() {
     Set*)
       if sudo "$here/system/install.sh"; then
         rm -f "$declined"
+        rule_note="ok:Polkit rule installed"
         echo
         echo "  Done. Requests now show the requesting command, for D-Bus callers too."
       else
@@ -222,9 +228,11 @@ rule_step() {
       ;;
     Don*)
       mkdir -p "$state_dir" && : > "$declined"
+      rule_note="info:No polkit rule. To set it up later, run $(me)"
       echo "  Won't ask again. To set up later, run: $(me)"
       ;;
     *)
+      rule_note="info:No polkit rule for now; asking again next time the shell starts"
       echo "  Asking again next time the shell starts."
       ;;
   esac
