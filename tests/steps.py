@@ -281,9 +281,9 @@ def first_starts(ctx, label):
     assert questions(ctx)[0]["selected"] == label, questions(ctx)[0]
 
 
-@step("the second question is {header} and offers:")
-def second_question(ctx, header):
-    q = questions(ctx)[1]
+@step("the {nth} question is {header} and offers:")
+def nth_question(ctx, nth, header):
+    q = questions(ctx)[["first", "second", "third"].index(nth)]
     assert q["header"] == header, q["header"]
     assert q["options"] == table_column(ctx), q["options"]
 

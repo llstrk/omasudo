@@ -209,7 +209,9 @@ def pick():
             break
         screen("Reviews  " + order(chosen) + paint("  → …", MUTED), "",
                f"A fallback is asked when {chosen[-1]} can't answer: offline, out of quota or too slow.", "")
-        nxt = gum_choose(f"If {chosen[-1]} can't answer, fall back to", [(paint("No fallback", bold=True), "none")] + rest)
+        # The first stop is "no fallback at all"; after that the list is done.
+        stop = "No fallback" if len(chosen) == 1 else "Done"
+        nxt = gum_choose(f"If {chosen[-1]} can't answer, fall back to", [(paint(stop, bold=True), "none")] + rest)
         if nxt is None or nxt == "none":
             break
         chosen.append(nxt)

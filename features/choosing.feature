@@ -54,11 +54,26 @@ Feature: Choosing who reviews agent requests
 
     Scenario: A reviewer with fallbacks
       When I run "omasudo reviewer" and choose:
-        | pi          |
-        | claude      |
-        | No fallback |
+        | pi     |
+        | claude |
+        | Done   |
       Then the config has the reviewers "pi, claude"
       And it prints "Reviews pi → claude"
+
+    Scenario: After the first fallback, the list ends with "Done"
+      When I run "omasudo reviewer" and choose:
+        | pi     |
+        | claude |
+        | Done   |
+      Then the second question is "If pi can't answer, fall back to" and offers:
+        | No fallback           |
+        | claude ● signed in    |
+        | opencode ● installed  |
+        | codex ○ not signed in |
+      And the third question is "If claude can't answer, fall back to" and offers:
+        | Done                  |
+        | opencode ● installed  |
+        | codex ○ not signed in |
 
     Scenario: Fallbacks are asked one at a time, without the ones already chosen
       When I run "omasudo reviewer" and choose:
