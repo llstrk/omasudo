@@ -36,7 +36,10 @@ When the dialog loads it also adds the `omasudo` command:
 `~/.local/bin/omasudo`, a small script that runs the plugin folder's
 `bin/omasudo`. It never replaces a file there that it didn't write, or one
 that runs another omasudo checkout that still exists (except that the copy
-Omarchy installed takes over from a development checkout).
+Omarchy installed takes over from a development checkout). With it comes
+`~/.local/share/applications/omasudo.desktop`, so **Omasudo** shows up when
+you search the Omarchy menu (Super+Space), under Apps and in the app
+launcher; it opens `omasudo` in a floating terminal.
 
 Setting up installs a small polkit rule: `/etc/polkit-1/rules.d/00-subject-note.rules`,
 its helper `/usr/local/lib/polkit-subject-note`, a polkitd drop-in that gives
@@ -252,7 +255,7 @@ omarchy plugin remove llstrk.omasudo
 ```
 
 This restores the stock dialog. As the plugin unloads it sees its folder go,
-removes the `omasudo` command, and a floating terminal asks whether to remove
+removes the `omasudo` command and menu entry, and a floating terminal asks whether to remove
 the polkit rule too (sudo).
 Saying no leaves the rule in place; remove it later with
 `sudo /usr/local/lib/omasudo/uninstall.sh`. polkitd is not restarted, so

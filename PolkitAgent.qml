@@ -438,8 +438,8 @@ Item {
   Timer { interval: 3600000; running: true; repeat: true; onTriggered: root.checkForUpdate() }
 
   // `omarchy plugin remove` disables the plugin (destroying this) and then
-  // deletes its folder. If the folder goes, remove the omasudo command when it
-  // ran this folder, and if the rule is still installed, offer to remove it,
+  // deletes its folder. If the folder goes, remove the omasudo command and
+  // menu entry when the command ran this folder, and if the rule is still installed, offer to remove it,
   // using the root-owned copy of the uninstaller.
   readonly property string removalWatchScript: [
     'u=/usr/local/lib/omasudo/uninstall.sh',
@@ -447,7 +447,11 @@ Item {
     'i=0',
     'while [ $i -lt 20 ]; do',
     '  if [ ! -e "$1/manifest.json" ]; then',
-    '    grep -qxF "# runs: $1" "$c" 2>/dev/null && rm -f "$c"',
+    '    if grep -qxF "# runs: $1" "$c" 2>/dev/null; then',
+    '      rm -f "$c"',
+    '      d="${XDG_DATA_HOME:-$HOME/.local/share}/applications/omasudo.desktop"',
+    '      grep -qxF X-Omasudo-Written-By=omasudo "$d" 2>/dev/null && rm -f "$d"',
+    '    fi',
     '    [ -x "$u" ] || exit 0',
     '    exec omarchy-launch-floating-terminal-with-presentation "gum confirm \'Omasudo was removed. Remove its polkit rule too?\' && sudo $u"',
     '  fi',

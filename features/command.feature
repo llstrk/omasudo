@@ -1,7 +1,8 @@
 Feature: The omasudo command
   The plugin lives in Omarchy's plugin folder, so when its dialog loads it adds
   an `omasudo` command to ~/.local/bin, as omaprofile does. The command is a
-  small script that runs the plugin's checkout.
+  small script that runs the plugin's checkout. A desktop entry makes it
+  findable in the Omarchy menu (Super+Space) and the app launcher.
 
   The steps run the real bin/omasudo in a throwaway home, with ~/.local/bin on
   PATH.
@@ -30,6 +31,22 @@ Feature: The omasudo command
         | claude      |
         | No fallback |
       Then it prints "Change it any time: run omasudo"
+
+  Rule: The Omarchy menu has it too
+
+    Scenario: Loading the dialog adds a menu entry
+      When the dialog loads
+      Then the desktop entry "Omasudo" opens "omasudo" in a floating terminal
+
+    Scenario: A menu entry of your own is left alone
+      Given ~/.local/share/applications/omasudo.desktop is an entry of my own
+      When the dialog loads
+      Then ~/.local/share/applications/omasudo.desktop is still my own entry
+
+    Scenario: Without the command there is no menu entry
+      Given ~/.local/bin/omasudo is a script of my own
+      When the dialog loads
+      Then there is no omasudo desktop entry
 
   Rule: It never replaces what isn't its own
 
@@ -67,3 +84,4 @@ Feature: The omasudo command
       When I run the omasudo command with "reviewer"
       Then it prints "omasudo was removed; removing this command too."
       And ~/.local/bin/omasudo is gone
+      And there is no omasudo desktop entry

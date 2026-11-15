@@ -356,6 +356,40 @@ def run_command(ctx, args):
     ctx.run_file(ctx.command_file(), *shlex.split(args))
 
 
+def desktop_file(ctx):
+    return ctx.home / ".local" / "share" / "applications" / "omasudo.desktop"
+
+
+def desktop_entry(ctx):
+    lines = desktop_file(ctx).read_text().splitlines()
+    assert lines[0] == "[Desktop Entry]", lines
+    return dict(l.split("=", 1) for l in lines[1:] if "=" in l)
+
+
+@step("the desktop entry {name} opens {command} in a floating terminal")
+def desktop_opens(ctx, name, command):
+    entry = desktop_entry(ctx)
+    assert entry["Name"] == name and entry["Type"] == "Application", entry
+    assert entry["Exec"] == f"omarchy-launch-floating-terminal-with-presentation {command}", entry["Exec"]
+    assert entry.get("Terminal") == "false" and "NoDisplay" not in entry and "Hidden" not in entry, entry
+
+
+@step("~/.local/share/applications/omasudo.desktop is an entry of my own")
+def own_entry(ctx):
+    desktop_file(ctx).parent.mkdir(parents=True, exist_ok=True)
+    desktop_file(ctx).write_text("[Desktop Entry]\nType=Application\nName=Mine\nExec=true\n")
+
+
+@step("~/.local/share/applications/omasudo.desktop is still my own entry")
+def still_own_entry(ctx):
+    assert desktop_file(ctx).read_text() == "[Desktop Entry]\nType=Application\nName=Mine\nExec=true\n"
+
+
+@step("there is no omasudo desktop entry")
+def no_entry(ctx):
+    assert not desktop_file(ctx).exists(), desktop_file(ctx).read_text()
+
+
 @step("~/.local/bin/omasudo is still there")
 def command_there(ctx):
     assert ctx.command_file().exists()

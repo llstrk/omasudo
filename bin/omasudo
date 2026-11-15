@@ -4,7 +4,7 @@
 #                         reviews (same as omasudo setup; needs a terminal)
 #   omasudo status        rule, reviewers and setup state
 #   omasudo setup --auto  the dialog's call when it loads: add the omasudo
-#                         command, and ask in a floating terminal if the rule
+#                         command and menu entry, and ask in a floating terminal if the rule
 #                         or the reviewer choice is missing
 #   omasudo reviewer      choose which agents review requests, in order
 #   omasudo agents        coding agents found on this machine
@@ -83,6 +83,8 @@ if [ -x \"\${OMASUDO_SYSTEM_ROOT:-}/usr/local/lib/omasudo/uninstall.sh\" ]; then
   echo \"  sudo \${OMASUDO_SYSTEM_ROOT:-}/usr/local/lib/omasudo/uninstall.sh\" >&2
 else
   echo \"omasudo was removed; removing this command too.\" >&2
+  d=\"\${XDG_DATA_HOME:-\$HOME/.local/share}/applications/omasudo.desktop\"
+  grep -qxF $desktop_mark \"\$d\" 2>/dev/null && rm -f \"\$d\"
   rm -f \"\$0\"
 fi
 exit 1"
@@ -92,10 +94,39 @@ exit 1"
     && mv -f "$command_path.tmp" "$command_path"
 }
 
+# A desktop entry, so omasudo shows up in the Omarchy menu (Super+Space)
+# search, under Apps and in the app launcher. It runs the omasudo command, so
+# it is written only while that runs this checkout, and never over a file
+# that is not ours.
+desktop_path=${XDG_DATA_HOME:-$HOME/.local/share}/applications/omasudo.desktop
+desktop_mark="X-Omasudo-Written-By=omasudo"
+
+link_desktop() {
+  [[ $(me) == omasudo ]] || return 0
+  if [[ -e $desktop_path || -L $desktop_path ]] && ! grep -qxF "$desktop_mark" "$desktop_path" 2>/dev/null; then
+    return 0
+  fi
+  local entry="[Desktop Entry]
+Type=Application
+Name=Omasudo
+GenericName=Agent sudo reviews
+Comment=Set up omasudo and choose which agent reviews root requests
+Exec=omarchy-launch-floating-terminal-with-presentation omasudo
+Icon=system-lock-screen
+Terminal=false
+Categories=Settings;Security;
+Keywords=sudo;polkit;pkexec;reviewer;agent;root;
+$desktop_mark"
+  [[ -f $desktop_path && $(cat "$desktop_path") == "$entry" ]] && return 0
+  mkdir -p "${desktop_path%/*}" || return 0
+  printf '%s\n' "$entry" > "$desktop_path.tmp" && mv -f "$desktop_path.tmp" "$desktop_path"
+}
+
 # How to name this script in messages: `omasudo` when that command runs it,
 # else its path.
 me() {
-  if [[ $(command_target 2>/dev/null) == "$here" && $(command -v omasudo) == "$command_path" ]]; then
+  # -ef: the same file, also when PATH reaches it through a symlink
+  if [[ $(command_target 2>/dev/null) == "$here" && $(command -v omasudo) -ef $command_path ]]; then
     echo omasudo
   elif [[ $here == "$HOME"/* ]]; then
     echo "~${here#"$HOME"}/bin/omasudo"
@@ -203,6 +234,7 @@ case ${1:-setup} in
   setup)
     if [[ ${2:-} == --auto ]]; then
       link_command
+      link_desktop
       rule_done=no
       [[ $(rule_state) == installed || -e $declined ]] && rule_done=yes
       [[ $rule_done == yes ]] && agents configured && exit 0
@@ -211,6 +243,7 @@ case ${1:-setup} in
       exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/omasudo") setup --prompted"
     fi
     link_command
+    link_desktop
     setup "${2:-}"
     ;;
   reviewer)
