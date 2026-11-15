@@ -1,9 +1,13 @@
 #!/bin/bash
-# Omasudo setup.
-#   omasudo status        rule, claude and setup state
-#   omasudo setup         install the polkit rule (asks first; needs a terminal)
-#   omasudo setup --auto  the dialog's call when it loads: ask in a
-#                               floating terminal, unless set up or declined
+# Omasudo setup. The dialog makes this the `omasudo` command (~/.local/bin).
+#   omasudo               set up: the polkit rule if it is missing, then who
+#                         reviews (same as omasudo setup; needs a terminal)
+#   omasudo status        rule, reviewers and setup state
+#   omasudo setup --auto  the dialog's call when it loads: add the omasudo
+#                         command and menu entry, and ask in a floating terminal if the rule
+#                         or the reviewer choice is missing
+#   omasudo reviewer      choose which agents review requests, in order
+#   omasudo agents        coding agents found on this machine
 #   omasudo uninstall     remove the polkit rule
 #   omasudo update [--check|--off|--on]  new versions (see bin/update.py)
 set -uo pipefail
@@ -15,13 +19,17 @@ declined=$state_dir/setup-declined
 # then a shell restart) does not open another one.
 lock=$state_dir/setup.lock
 
-RULE=/etc/polkit-1/rules.d/00-subject-note.rules
-HELPER=/usr/local/lib/polkit-subject-note
-DROPIN=/etc/systemd/system/polkit.service.d/subject-note.conf
-UNINSTALLER=/usr/local/lib/omasudo/uninstall.sh
+# OMASUDO_SYSTEM_ROOT prefixes the system paths status reads; the feature
+# tests point it at a throwaway folder. Unset, they are the real ones.
+sysroot=${OMASUDO_SYSTEM_ROOT:-}
+RULE=$sysroot/etc/polkit-1/rules.d/00-subject-note.rules
+HELPER=$sysroot/usr/local/lib/polkit-subject-note
+DROPIN=$sysroot/etc/systemd/system/polkit.service.d/subject-note.conf
+UNINSTALLER=$sysroot/usr/local/lib/omasudo/uninstall.sh
 # rules.d is readable only by root and polkitd, so install.sh records the
 # installed rule's hash here for status to compare.
-RULE_SUM=/usr/local/lib/omasudo/rule.sha256
+RULE_SUM=$sysroot/usr/local/lib/omasudo/rule.sha256
+NOTES=$sysroot/run/polkit-subject
 
 rule_state() {
   if [[ ! -e $HELPER && ! -e $DROPIN && ! -e $UNINSTALLER ]]; then
@@ -30,17 +38,128 @@ rule_state() {
     && cmp -s "$here/system/polkit-subject-note" "$HELPER" \
     && cmp -s "$here/system/subject-note.conf" "$DROPIN" \
     && cmp -s "$here/system/uninstall.sh" "$UNINSTALLER" \
-    && [[ -d /run/polkit-subject ]]; then
+    && [[ -d $NOTES ]]; then
     echo installed
   else
     echo outdated
   fi
 }
 
-claude_state() {
-  command -v claude >/dev/null && echo ok || echo missing
+# The `omasudo` command: a small script in ~/.local/bin that runs a checkout,
+# written when the dialog loads (as omaprofile does).
+command_path=$HOME/.local/bin/omasudo
+command_mark="# The omasudo command, written by the omasudo plugin when its dialog loads."
+plugins=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins
+
+# The checkout our command runs; fails if the file there is not ours.
+command_target() {
+  [[ -f $command_path ]] && grep -qxF "$command_mark" "$command_path" || return 1
+  sed -n 's/^# runs: //p' "$command_path" | head -n 1
 }
 
+# Whether this is the copy Omarchy installed: a real folder in its plugin
+# folder (a development checkout is linked in instead). The comparison
+# resolves symlinks above it, such as a ~/.config kept in a dotfiles repo.
+installed_copy() {
+  local dir=$plugins/llstrk.omasudo
+  [[ -d $dir && ! -L $dir && $(cd "$dir" && pwd -P) == "$here" ]]
+}
+
+# Writes the command, unless something else owns it: a file that is not ours,
+# or another checkout that still exists. The copy Omarchy installed takes the
+# command over from a development checkout (whose nest tests write the real
+# ~/.local/bin).
+link_command() {
+  local target script quoted
+  if [[ -e $command_path || -L $command_path ]]; then
+    target=$(command_target) || return 0
+    if [[ $target != "$here" && -x $target/bin/omasudo ]] && ! installed_copy; then
+      return 0
+    fi
+  fi
+  quoted=\'${here//\'/\'\\\'\'}\'
+  script="#!/bin/sh
+$command_mark
+# runs: $here
+target=$quoted/bin/omasudo
+if [ -x \"\$target\" ]; then
+  exec \"\$target\" \"\$@\"
+fi
+# The plugin was removed.
+if [ -x \"\${OMASUDO_SYSTEM_ROOT:-}/usr/local/lib/omasudo/uninstall.sh\" ]; then
+  echo \"omasudo was removed, but its polkit rule is still installed. Remove it with:\" >&2
+  echo \"  sudo \${OMASUDO_SYSTEM_ROOT:-}/usr/local/lib/omasudo/uninstall.sh\" >&2
+else
+  echo \"omasudo was removed; removing this command too.\" >&2
+  d=\"\${XDG_DATA_HOME:-\$HOME/.local/share}/applications/omasudo.desktop\"
+  grep -qxF $desktop_mark \"\$d\" 2>/dev/null && rm -f \"\$d\"
+  rm -f \"\$0\"
+fi
+exit 1"
+  [[ -f $command_path && $(cat "$command_path") == "$script" ]] && return 0
+  mkdir -p "${command_path%/*}" || return 0
+  printf '%s\n' "$script" > "$command_path.tmp" && chmod 755 "$command_path.tmp" \
+    && mv -f "$command_path.tmp" "$command_path"
+}
+
+# A desktop entry, so omasudo shows up in the Omarchy menu (Super+Space)
+# search, under Apps and in the app launcher. It runs the omasudo command, so
+# it is written only while that runs this checkout, and never over a file
+# that is not ours.
+desktop_path=${XDG_DATA_HOME:-$HOME/.local/share}/applications/omasudo.desktop
+desktop_mark="X-Omasudo-Written-By=omasudo"
+
+link_desktop() {
+  [[ $(me) == omasudo ]] || return 0
+  if [[ -e $desktop_path || -L $desktop_path ]] && ! grep -qxF "$desktop_mark" "$desktop_path" 2>/dev/null; then
+    return 0
+  fi
+  local entry="[Desktop Entry]
+Type=Application
+Name=Omasudo
+GenericName=Agent sudo reviews
+Comment=Set up omasudo and choose which agent reviews root requests
+Exec=omarchy-launch-floating-terminal-with-presentation omasudo
+Icon=system-lock-screen
+Terminal=false
+Categories=Settings;Security;
+Keywords=sudo;polkit;pkexec;reviewer;agent;root;
+$desktop_mark"
+  [[ -f $desktop_path && $(cat "$desktop_path") == "$entry" ]] && return 0
+  mkdir -p "${desktop_path%/*}" || return 0
+  printf '%s\n' "$entry" > "$desktop_path.tmp" && mv -f "$desktop_path.tmp" "$desktop_path"
+}
+
+# How to name this script in messages: `omasudo` when that command runs it,
+# else its path.
+me() {
+  # -ef: the same file, also when PATH reaches it through a symlink
+  if [[ $(command_target 2>/dev/null) == "$here" && $(command -v omasudo) -ef $command_path ]]; then
+    echo omasudo
+  elif [[ $here == "$HOME"/* ]]; then
+    echo "~${here#"$HOME"}/bin/omasudo"
+  else
+    echo "$here/bin/omasudo"
+  fi
+}
+
+agents() {
+  OMASUDO_ME=$(me) python3 -I "$here/bin/agents.py" "$@"
+}
+
+reviewers_state() {
+  if ! agents configured; then
+    echo "not chosen"
+  else
+    local r
+    r=$(agents get | paste -sd, -)
+    echo "${r:-none}"
+  fi
+}
+
+# setup [--prompted]: --prompted (from setup --auto) skips a rule step the
+# user declined and asks who reviews only if nobody chose yet; run by hand,
+# setup offers the rule again and always opens the picker.
 setup() {
   mkdir -p "$state_dir"
   exec 9>"$lock"
@@ -48,67 +167,106 @@ setup() {
     echo "Setup is already open in another window."
     return 0
   fi
-  local rule=$(rule_state) claude=$(claude_state)
-  local title="Finish setting up Omasudo"
-  [[ $rule == outdated ]] && title="Update Omasudo's polkit rule"
-
-  local body=(
-    "To show which program asked for root, including systemctl and other"
-    "D-Bus requests (not just pkexec), Omasudo installs a polkit rule:"
-    ""
-    "  $RULE"
-    "  $HELPER"
-    "  $DROPIN"
-    "  $UNINSTALLER (and the rule's hash next to it)"
-    ""
-    "It notes the requesting PID per action in /run/polkit-subject (tmpfs),"
-    "never command lines, and makes no authorization decision."
-    "polkitd restarts once; the dialog reconnects by itself."
-  )
-  if [[ $claude == missing ]]; then
-    body+=("" "Claude Code (claude) is not installed, so dialogs will show the"
-           "command but no verdict. Get it at https://claude.com/claude-code")
+  local rule=$(rule_state)
+  if [[ $rule == installed ]]; then
+    :
+  elif [[ ${1:-} == --prompted && -e $declined ]]; then
+    :
+  else
+    rule_step "$rule" || return 1
   fi
-  gum style --border rounded --padding "1 2" --width 78 "$title" "" "${body[@]}"
+  if [[ ${1:-} != --prompted ]] || ! agents configured; then
+    # The picker clears the screen, so it shows the rule step's outcome.
+    OMASUDO_NOTE=$rule_note agents pick
+  fi
+}
+
+# What the rule step did, for the picker's first screen: "ok:<text>" or
+# "info:<text>".
+rule_note=""
+
+rule_step() {
+  local rule=$1
+  local title="One step first: a polkit rule"
+  [[ $rule == outdated ]] && title="The polkit rule needs an update"
+  # The picker's look (bin/agents.py): a badge in the theme's blue, then text.
+  local bold=$'\e[1m' off=$'\e[0m' badge=$'\e[1;30;44m omasudo \e[0m'
+
+  [[ -t 1 ]] && printf '\e[H\e[2J'
+  printf '\n  %s  %s\n\n' "$badge" "$bold$title$off"
+  printf '  %s\n' \
+    "To show which program asked for root, for systemctl and other D-Bus" \
+    "requests too (not just pkexec), omasudo installs a polkit rule. It notes" \
+    "the requesting PID per action in /run/polkit-subject (tmpfs), never" \
+    "command lines, and makes no authorization decision." \
+    "" \
+    "  $RULE" \
+    "  $HELPER" \
+    "  $DROPIN" \
+    "  $UNINSTALLER, and the rule's hash" \
+    "" \
+    "polkitd restarts once; the dialog reconnects by itself."
   echo
 
   local choice
-  choice=$(gum choose "Set it up (asks for your password)" "Not now" "Don't ask again") || choice="Not now"
+  choice=$(gum choose --cursor "  › " --header "  Install it?" \
+    "Set it up (asks for your password)" "Not now" "Don't ask again") || {
+    choice="Not now"
+    [[ -t 2 ]] && printf '\e[1A\e[2K' >&2  # gum's "nothing selected"; ours follows
+  }
   case $choice in
     Set*)
       if sudo "$here/system/install.sh"; then
         rm -f "$declined"
+        rule_note="ok:Polkit rule installed"
         echo
-        echo "Done. Agent requests now show the requesting command and a verdict."
+        echo "  Done. Requests now show the requesting command, for D-Bus callers too."
       else
-        echo "Setup failed; nothing else was changed. Retry with: $here/bin/omasudo setup" >&2
+        echo "  Setup failed; nothing else was changed. Retry with: $(me)" >&2
         return 1
       fi
       ;;
     Don*)
       mkdir -p "$state_dir" && : > "$declined"
-      echo "Won't ask again. To set up later, run: $here/bin/omasudo setup"
+      rule_note="info:No polkit rule. To set it up later, run $(me)"
+      echo "  Won't ask again. To set up later, run: $(me)"
       ;;
     *)
-      echo "Asking again next time the shell starts."
+      rule_note="info:No polkit rule for now; asking again next time the shell starts"
+      echo "  Asking again next time the shell starts."
       ;;
   esac
 }
 
-case ${1:-status} in
+case ${1:-setup} in
+  -h|--help|help)
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
   status)
     echo "rule=$(rule_state)"
-    echo "claude=$(claude_state)"
+    echo "reviewers=$(reviewers_state)"
     echo "declined=$([[ -e $declined ]] && echo yes || echo no)"
     ;;
   setup)
     if [[ ${2:-} == --auto ]]; then
-      [[ $(rule_state) == installed || -e $declined ]] && exit 0
+      link_command
+      link_desktop
+      rule_done=no
+      [[ $(rule_state) == installed || -e $declined ]] && rule_done=yes
+      [[ $rule_done == yes ]] && agents configured && exit 0
       mkdir -p "$state_dir"
       flock -n "$lock" true || exit 0  # a prompt is already open
-      exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/omasudo") setup"
+      exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/omasudo") setup --prompted"
     fi
-    setup
+    link_command
+    link_desktop
+    setup "${2:-}"
+    ;;
+  reviewer)
+    agents pick
+    ;;
+  agents)
+    agents list
     ;;
   update)
     shift
@@ -118,7 +276,7 @@ case ${1:-status} in
     if [[ -x $UNINSTALLER ]]; then sudo "$UNINSTALLER"; else sudo "$here/system/uninstall.sh"; fi
     ;;
   *)
-    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

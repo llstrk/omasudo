@@ -193,16 +193,21 @@ Item {
 
     var r = null
     try { r = JSON.parse(text) } catch (e) {}
-    var ok = exitCode === 0 && r && r.verdict !== "ERROR"
+    var ok = exitCode === 0 && r && r.verdict !== "ERROR" && r.verdict !== "OFF"
     if (ok) {
       pruneCache()
       var cache = Object.assign({}, reviewCache)
-      cache[key] = { verdict: r.verdict, summary: r.summary, details: r.details, command: r.command, at: Date.now() }
+      cache[key] = { verdict: r.verdict, summary: r.summary, details: r.details, command: r.command, reviewer: r.reviewer, at: Date.now() }
       reviewCache = cache
     }
 
     if (agentActive && currentKey === key && reviewState === "running") {
-      review = ok ? r : { verdict: "ERROR", summary: strings.t("review.error"), details: "" }
+      if (r && r.verdict === "OFF") {  // no AI review chosen: show the command only
+        review = null
+        reviewState = ""
+        return
+      }
+      review = ok ? r : { verdict: "ERROR", summary: (r && r.verdict === "ERROR" && r.summary) || strings.t("review.error"), details: "" }
       reviewState = "done"
     }
   }
@@ -433,13 +438,23 @@ Item {
   Timer { interval: 3600000; running: true; repeat: true; onTriggered: root.checkForUpdate() }
 
   // `omarchy plugin remove` disables the plugin (destroying this) and then
-  // deletes its folder. If the folder goes while the rule is still installed,
-  // offer to remove the rule, using the root-owned copy of the uninstaller.
+  // deletes its folder. If the folder goes, remove the omasudo command and
+  // menu entry when the command ran this folder, and if the rule is still installed, offer to remove it,
+  // using the root-owned copy of the uninstaller.
   readonly property string removalWatchScript: [
     'u=/usr/local/lib/omasudo/uninstall.sh',
+    'c="$HOME/.local/bin/omasudo"',
+    // The command records the folder with symlinks resolved. A linked-in
+    // development checkout is still there after its link goes: leave it.
+    '[ -L "$1" ] && r="" || r=$(readlink -f "$1")',
     'i=0',
     'while [ $i -lt 20 ]; do',
     '  if [ ! -e "$1/manifest.json" ]; then',
+    '    if [ -n "$r" ] && grep -qxF "# runs: $r" "$c" 2>/dev/null; then',
+    '      rm -f "$c"',
+    '      d="${XDG_DATA_HOME:-$HOME/.local/share}/applications/omasudo.desktop"',
+    '      grep -qxF X-Omasudo-Written-By=omasudo "$d" 2>/dev/null && rm -f "$d"',
+    '    fi',
     '    [ -x "$u" ] || exit 0',
     '    exec omarchy-launch-floating-terminal-with-presentation "gum confirm \'Omasudo was removed. Remove its polkit rule too?\' && sudo $u"',
     '  fi',
@@ -759,6 +774,7 @@ Item {
             ? strings.t("review.running").arg(root.reviewSeconds)
             : (root.review
                 ? strings.t("review." + root.review.verdict) + " — " + (root.review.summary || "")
+                  + (root.review.reviewer ? "  (" + strings.t("review.by").arg(root.review.reviewer) + ")" : "")
                   + (root.review.cachedAt ? "  (" + strings.t("review.cached").arg(Math.max(1, Math.round((Date.now() - root.review.cachedAt) / 60000))) + ")" : "")
                 : "")
           color: root.verdictColor
