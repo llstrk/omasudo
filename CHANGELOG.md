@@ -1,7 +1,8 @@
 # Changelog
 
 ## 0.5.0
-- Choose the reviewer: Claude Code, Codex, pi, omp, opencode or Grok, with fallbacks in order, or no AI review. Setup lists the agents it finds, marks the Omarchy default and which are signed in, and starts on the default. `bin/omasudo reviewer` chooses again; `bin/omasudo agents` lists them. Existing installs are asked once.
+- Choose the reviewer: Claude Code, Codex, pi, omp, opencode or Grok, with fallbacks in order, or no AI review. Setup lists the agents it finds, marks the Omarchy default and which are signed in, and starts on the default. `omasudo reviewer` chooses again; `omasudo agents` lists them. Existing installs are asked once.
+- An `omasudo` command: the dialog adds `~/.local/bin/omasudo`, which runs the plugin, so `omasudo reviewer` works from any terminal. A file there it didn't write is left alone; removing the plugin removes it.
 - Evidence first: man-page entries for the given subcommands and flags, packages and unit files go into the prompt, so reviewers seldom need tools and answer faster.
 - pi, omp, opencode and Grok can read, search and list files to look further, inside a bubblewrap sandbox that shows only system locations and the agent's own settings; never the rest of your home folder. Without bubblewrap they run with their tools off. Codex stays without tools.
 - A clearer first-run screen: the picker and the polkit rule step are short, in the theme's colours, one question at a time.

@@ -226,6 +226,10 @@ def order(names):
 
 
 def pretty_path():
+    """How to run omasudo: bin/omasudo passes `omasudo` when that command runs
+    this checkout."""
+    if os.environ.get("OMASUDO_ME"):
+        return os.environ["OMASUDO_ME"]
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omasudo")
     home = str(Path.home())
     return "~" + path[len(home):] if path.startswith(home + "/") else path

@@ -1,9 +1,10 @@
 #!/bin/bash
-# Omasudo setup.
+# Omasudo setup. The dialog makes this the `omasudo` command (~/.local/bin).
 #   omasudo status        rule, reviewers and setup state
 #   omasudo setup         install the polkit rule and choose reviewers (needs a terminal)
-#   omasudo setup --auto  the dialog's call when it loads: ask in a floating
-#                         terminal if the rule or the reviewer choice is missing
+#   omasudo setup --auto  the dialog's call when it loads: add the omasudo
+#                         command, and ask in a floating terminal if the rule
+#                         or the reviewer choice is missing
 #   omasudo reviewer      choose which agents review requests, in order
 #   omasudo agents        coding agents found on this machine
 #   omasudo uninstall     remove the polkit rule
@@ -43,8 +44,67 @@ rule_state() {
   fi
 }
 
+# The `omasudo` command: a small script in ~/.local/bin that runs a checkout,
+# written when the dialog loads (as omaprofile does).
+command_path=$HOME/.local/bin/omasudo
+command_mark="# The omasudo command, written by the omasudo plugin when its dialog loads."
+plugins=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins
+
+# The checkout our command runs; fails if the file there is not ours.
+command_target() {
+  [[ -f $command_path ]] && grep -qxF "$command_mark" "$command_path" || return 1
+  sed -n 's/^# runs: //p' "$command_path" | head -n 1
+}
+
+# Writes the command, unless something else owns it: a file that is not ours,
+# or another checkout that still exists. The copy Omarchy installed takes the
+# command over from a development checkout (whose nest tests write the real
+# ~/.local/bin).
+link_command() {
+  local target script quoted
+  if [[ -e $command_path || -L $command_path ]]; then
+    target=$(command_target) || return 0
+    if [[ $target != "$here" && -x $target/bin/omasudo && $here != "$plugins/llstrk.omasudo" ]]; then
+      return 0
+    fi
+  fi
+  quoted=\'${here//\'/\'\\\'\'}\'
+  script="#!/bin/sh
+$command_mark
+# runs: $here
+target=$quoted/bin/omasudo
+if [ -x \"\$target\" ]; then
+  exec \"\$target\" \"\$@\"
+fi
+# The plugin was removed.
+if [ -x \"\${OMASUDO_SYSTEM_ROOT:-}/usr/local/lib/omasudo/uninstall.sh\" ]; then
+  echo \"omasudo was removed, but its polkit rule is still installed. Remove it with:\" >&2
+  echo \"  sudo \${OMASUDO_SYSTEM_ROOT:-}/usr/local/lib/omasudo/uninstall.sh\" >&2
+else
+  echo \"omasudo was removed; removing this command too.\" >&2
+  rm -f \"\$0\"
+fi
+exit 1"
+  [[ -f $command_path && $(cat "$command_path") == "$script" ]] && return 0
+  mkdir -p "${command_path%/*}" || return 0
+  printf '%s\n' "$script" > "$command_path.tmp" && chmod 755 "$command_path.tmp" \
+    && mv -f "$command_path.tmp" "$command_path"
+}
+
+# How to name this script in messages: `omasudo` when that command runs it,
+# else its path.
+me() {
+  if [[ $(command_target 2>/dev/null) == "$here" && $(command -v omasudo) == "$command_path" ]]; then
+    echo omasudo
+  elif [[ $here == "$HOME"/* ]]; then
+    echo "~${here#"$HOME"}/bin/omasudo"
+  else
+    echo "$here/bin/omasudo"
+  fi
+}
+
 agents() {
-  python3 -I "$here/bin/agents.py" "$@"
+  OMASUDO_ME=$(me) python3 -I "$here/bin/agents.py" "$@"
 }
 
 reviewers_state() {
@@ -78,7 +138,7 @@ setup() {
   if ! agents configured; then
     agents pick
   elif [[ ${1:-} != --prompted ]]; then
-    echo "  Reviews: $(reviewers_state | sed 's/,/ → /g'). Change with: $here/bin/omasudo reviewer"
+    echo "  Reviews: $(reviewers_state | sed 's/,/ → /g'). Change with: $(me) reviewer"
   fi
 }
 
@@ -115,13 +175,13 @@ rule_step() {
         echo
         echo "  Done. Requests now show the requesting command, for D-Bus callers too."
       else
-        echo "  Setup failed; nothing else was changed. Retry with: $here/bin/omasudo setup" >&2
+        echo "  Setup failed; nothing else was changed. Retry with: $(me) setup" >&2
         return 1
       fi
       ;;
     Don*)
       mkdir -p "$state_dir" && : > "$declined"
-      echo "  Won't ask again. To set up later, run: $here/bin/omasudo setup"
+      echo "  Won't ask again. To set up later, run: $(me) setup"
       ;;
     *)
       echo "  Asking again next time the shell starts."
@@ -137,6 +197,7 @@ case ${1:-status} in
     ;;
   setup)
     if [[ ${2:-} == --auto ]]; then
+      link_command
       rule_done=no
       [[ $(rule_state) == installed || -e $declined ]] && rule_done=yes
       [[ $rule_done == yes ]] && agents configured && exit 0
@@ -144,6 +205,7 @@ case ${1:-status} in
       flock -n "$lock" true || exit 0  # a prompt is already open
       exec omarchy-launch-floating-terminal-with-presentation "$(printf %q "$here/bin/omasudo") setup --prompted"
     fi
+    link_command
     setup "${2:-}"
     ;;
   reviewer)
@@ -160,7 +222,7 @@ case ${1:-status} in
     if [[ -x $UNINSTALLER ]]; then sudo "$UNINSTALLER"; else sudo "$here/system/uninstall.sh"; fi
     ;;
   *)
-    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

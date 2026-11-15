@@ -59,7 +59,7 @@ Feature: Reviewing a request
 
     Scenario: No reviewer chosen yet
       When the agent asks to run "systemctl restart bluetooth"
-      Then the dialog shows NO VERDICT "No reviewer chosen yet: run bin/omasudo reviewer."
+      Then the dialog shows NO VERDICT "No reviewer chosen yet: run omasudo reviewer."
 
   Rule: Reviewers get the evidence, not tools
 

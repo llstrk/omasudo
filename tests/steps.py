@@ -52,7 +52,7 @@ class Context:
         for name in TOOLS:
             (self.bin / name).symlink_to(FAKES)
         self.env = {
-            "PATH": f"{self.bin}:{self.shims}:/usr/bin:/bin",
+            "PATH": f"{self.bin}:{self.home}/.local/bin:{self.shims}:/usr/bin:/bin",
             "HOME": str(self.home),
             "XDG_CONFIG_HOME": str(self.config),
             "XDG_STATE_HOME": str(self.home / ".local" / "state"),
@@ -116,6 +116,14 @@ class Context:
                                    capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
         return self.last
 
+    def run_file(self, path, *args):
+        self.last = subprocess.run([str(path), *args], env=self.env, capture_output=True, text=True,
+                                   timeout=60, stdin=subprocess.DEVNULL)
+        return self.last
+
+    def command_file(self):
+        return self.home / ".local" / "bin" / "omasudo"
+
     def review(self, command):
         files = []
         for name, path in self.scripts.items():
@@ -175,6 +183,12 @@ def rule_installed(ctx):
     digest = hashlib.sha256((src / "00-subject-note.rules").read_bytes()).hexdigest()
     (root / "usr/local/lib/omasudo/rule.sha256").write_text(digest + "\n")
     (root / "run/polkit-subject").mkdir(parents=True)
+
+
+@step("the polkit rule is not installed")
+def rule_not_installed(ctx):
+    shutil.rmtree(ctx.sysroot)
+    ctx.sysroot.mkdir()
 
 
 @step("these coding agents are installed:")
@@ -254,6 +268,102 @@ def run_plain(ctx, command):
 def dialog_loads(ctx):
     # What the dialog runs 3 s after it loads (see PolkitAgent.qml).
     ctx.run("omasudo setup --auto")
+
+
+@step("the dialog has loaded")
+def dialog_loaded(ctx):
+    dialog_loads(ctx)
+
+
+# ------------------------------------------------------------------ the command
+
+MARK = "# The omasudo command, written by the omasudo plugin when its dialog loads."
+
+
+def write_command(ctx, checkout):
+    """A command an omasudo plugin at checkout wrote."""
+    ctx.command_file().parent.mkdir(parents=True, exist_ok=True)
+    ctx.command_file().write_text(f"#!/bin/sh\n{MARK}\n# runs: {checkout}\nexec {shlex.quote(str(checkout))}/bin/omasudo \"$@\"\n")
+    ctx.command_file().chmod(0o755)
+
+
+def command_runs(ctx):
+    lines = ctx.command_file().read_text().splitlines()
+    assert MARK in lines, lines
+    return Path(next(l for l in lines if l.startswith("# runs: "))[len("# runs: "):])
+
+
+def copy_checkout(dest):
+    dest.mkdir(parents=True)
+    for part in ("bin", "system"):
+        shutil.copytree(ROOT / part, dest / part, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy2(ROOT / "manifest.json", dest)
+    return dest
+
+
+@step("~/.local/bin/omasudo runs this checkout")
+def command_is_here(ctx):
+    assert command_runs(ctx) == ROOT, command_runs(ctx)
+    ctx.run_file(ctx.command_file(), "status")
+    assert ctx.last.returncode == 0 and "reviewers=" in ctx.last.stdout, ctx.output()
+
+
+@step("~/.local/bin/omasudo is a script of my own")
+def own_command(ctx):
+    ctx.command_file().parent.mkdir(parents=True, exist_ok=True)
+    ctx.command_file().write_text("#!/bin/sh\necho mine\n")
+    ctx.command_file().chmod(0o755)
+
+
+@step("~/.local/bin/omasudo is still my own script")
+def still_own(ctx):
+    assert ctx.command_file().read_text() == "#!/bin/sh\necho mine\n"
+
+
+@step("~/.local/bin/omasudo runs another omasudo checkout")
+def other_command(ctx):
+    ctx.other = copy_checkout(ctx.tmp / "other checkout")
+    write_command(ctx, ctx.other)
+
+
+@step("~/.local/bin/omasudo still runs the other checkout")
+def still_other(ctx):
+    assert command_runs(ctx) == ctx.other, command_runs(ctx)
+
+
+@step("~/.local/bin/omasudo runs an omasudo checkout that is gone")
+def gone_command(ctx):
+    # Written by the plugin itself, so the fallback under test is the real one.
+    gone = copy_checkout(ctx.tmp / "removed checkout")
+    ctx.run_file(gone / "bin" / "omasudo", "setup", "--auto")
+    shutil.rmtree(gone)
+    assert command_runs(ctx) == gone, command_runs(ctx)
+
+
+@step("the dialog of a copy in Omarchy's plugin folder loads")
+def installed_copy_loads(ctx):
+    ctx.installed = copy_checkout(ctx.config / "omarchy" / "plugins" / "llstrk.omasudo")
+    ctx.run_file(ctx.installed / "bin" / "omasudo", "setup", "--auto")
+
+
+@step("~/.local/bin/omasudo runs that copy")
+def runs_copy(ctx):
+    assert command_runs(ctx) == ctx.installed, command_runs(ctx)
+
+
+@step("I run the omasudo command with {args}")
+def run_command(ctx, args):
+    ctx.run_file(ctx.command_file(), *shlex.split(args))
+
+
+@step("~/.local/bin/omasudo is still there")
+def command_there(ctx):
+    assert ctx.command_file().exists()
+
+
+@step("~/.local/bin/omasudo is gone")
+def command_gone(ctx):
+    assert not ctx.command_file().exists()
 
 
 @step("the picker does not list {agent}")

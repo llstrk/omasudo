@@ -160,7 +160,7 @@ def main():
     config = agents.load()
     names = config.get("reviewers")
     if not isinstance(names, list):
-        emit("ERROR", "No reviewer chosen yet: run bin/omasudo reviewer.")
+        emit("ERROR", "No reviewer chosen yet: run omasudo reviewer.")
         return
     names = [n for n in names if n in reviewers.SUPPORTED]
     if not names:

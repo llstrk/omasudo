@@ -32,8 +32,13 @@ that changes; nothing outside the plugin folder is touched until you pick
 **Set it up**, which asks for your sudo password once. **Not now** asks again
 the next time the shell starts, **Don't ask again** stops asking.
 
-Setting up (or running `bin/omasudo setup` from the plugin folder)
-installs a small polkit rule: `/etc/polkit-1/rules.d/00-subject-note.rules`,
+When the dialog loads it also adds the `omasudo` command:
+`~/.local/bin/omasudo`, a small script that runs the plugin folder's
+`bin/omasudo`. It never replaces a file there that it didn't write, or one
+that runs another omasudo checkout that still exists (except that the copy
+Omarchy installed takes over from a development checkout).
+
+Setting up (or running `omasudo setup`) installs a small polkit rule: `/etc/polkit-1/rules.d/00-subject-note.rules`,
 its helper `/usr/local/lib/polkit-subject-note`, a polkitd drop-in that gives
 it a tmpfs folder, and a root-owned copy of the uninstaller. polkitd restarts
 once; the dialog notices and registers again within a few seconds.
@@ -66,9 +71,9 @@ account's folder in its sandbox). Agents omasudo can't drive yet are
 listed but can't be picked.
 
 ```sh
-bin/omasudo reviewer   # choose again
-bin/omasudo agents     # what was found
-bin/omasudo status     # rule state, reviewers, whether setup was declined
+omasudo reviewer   # choose again
+omasudo agents     # what was found
+omasudo status     # rule state, reviewers, whether setup was declined
 ```
 
 ## Update
@@ -87,9 +92,9 @@ The icon is placed once. Dragging it off the bar is fine: the plugin is also
 recorded in `shell.json`'s plugins list, so the password dialog stays enabled.
 
 ```sh
-bin/omasudo update           # check, show what's new, ask, update
-bin/omasudo update --check   # check now
-bin/omasudo update --off     # no scheduled checks (--on to resume)
+omasudo update           # check, show what's new, ask, update
+omasudo update --check   # check now
+omasudo update --off     # no scheduled checks (--on to resume)
 ```
 
 ## How it works
@@ -184,7 +189,7 @@ always shown; read it.
 
 ## Configuration
 
-`~/.config/omasudo/config.json`, written by `bin/omasudo reviewer`:
+`~/.config/omasudo/config.json`, written by `omasudo reviewer`:
 
 ```json
 {
@@ -222,6 +227,7 @@ executable:
 - `choosing.feature`: picking reviewers and fallbacks
 - `reviewing.feature`: evidence, fallbacks, what leaves the machine
 - `lockdown.feature`: how each agent is run, and its sandbox
+- `command.feature`: the `omasudo` command in `~/.local/bin`
 
 A small standard-library runner (`tests/gherkin.py`) runs them against the
 real `bin/omasudo` and `bin/review.py`. gum, mise, Omarchy's commands and the
@@ -245,7 +251,8 @@ omarchy plugin remove llstrk.omasudo
 ```
 
 This restores the stock dialog. As the plugin unloads it sees its folder go,
-and a floating terminal asks whether to remove the polkit rule too (sudo).
+removes the `omasudo` command, and a floating terminal asks whether to remove
+the polkit rule too (sudo).
 Saying no leaves the rule in place; remove it later with
 `sudo /usr/local/lib/omasudo/uninstall.sh`. polkitd is not restarted, so
 the stock dialog keeps working.
