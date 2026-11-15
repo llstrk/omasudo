@@ -444,10 +444,13 @@ Item {
   readonly property string removalWatchScript: [
     'u=/usr/local/lib/omasudo/uninstall.sh',
     'c="$HOME/.local/bin/omasudo"',
+    // The command records the folder with symlinks resolved. A linked-in
+    // development checkout is still there after its link goes: leave it.
+    '[ -L "$1" ] && r="" || r=$(readlink -f "$1")',
     'i=0',
     'while [ $i -lt 20 ]; do',
     '  if [ ! -e "$1/manifest.json" ]; then',
-    '    if grep -qxF "# runs: $1" "$c" 2>/dev/null; then',
+    '    if [ -n "$r" ] && grep -qxF "# runs: $r" "$c" 2>/dev/null; then',
     '      rm -f "$c"',
     '      d="${XDG_DATA_HOME:-$HOME/.local/share}/applications/omasudo.desktop"',
     '      grep -qxF X-Omasudo-Written-By=omasudo "$d" 2>/dev/null && rm -f "$d"',

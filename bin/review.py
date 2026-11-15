@@ -10,8 +10,10 @@ Reviewers come from ~/.config/omasudo/config.json (bin/agents.py), tried in
 order until one answers. Evidence (man-page entries, unit files, files named
 in the command) is gathered here first, so reviewers need no tools; see
 bin/reviewers.py for how each one runs. Nothing is written to disk outside a
-temporary directory, sessions are not saved, and obvious secrets are blanked
-before anything leaves the machine.
+temporary directory and sessions are not saved, except that Grok always saves
+its session: in bubblewrap into an emptied sessions folder, without it into
+~/.grok/sessions. Obvious secrets are blanked before anything leaves the
+machine.
 """
 import json
 import os
@@ -28,7 +30,7 @@ import agents  # noqa: E402
 import evidence  # noqa: E402
 import reviewers  # noqa: E402
 
-BUDGET = 90  # seconds for all reviewers; keeps running after the dialog closes, result is cached
+BUDGET = 90  # seconds for evidence and all reviewers; keeps running after the dialog closes, result is cached
 MAX_FILE = 32 * 1024  # bytes inlined per named file
 MAX_FILES = 4
 
@@ -167,6 +169,9 @@ def main():
         emit("OFF", "")
         return
 
+    # The budget covers evidence too: the dialog counts on a verdict, or why
+    # there is none, within it.
+    deadline = time.monotonic() + BUDGET
     command = redact(req.get("command", ""))
     body = {
         "polkit_action": req.get("actionId", ""),
@@ -191,16 +196,19 @@ def main():
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    deadline = time.monotonic() + BUDGET
     failed = []
+    confs = config.get("agents") if isinstance(config.get("agents"), dict) else {}
     for name in names:
         if time.monotonic() > deadline - 5:
             failed.append(f"{name}: out of time")
             continue
         try:
-            data = ask(name, prompt, (config.get("agents") or {}).get(name, {}), deadline)
-        except RuntimeError as e:
-            failed.append(f"{name}: {e}")
+            conf = confs.get(name) if isinstance(confs.get(name), dict) else {}
+            data = ask(name, prompt, conf, deadline)
+        except Exception as e:  # any failure moves on to the next reviewer
+            # Our own reasons are short and never contain the request; for
+            # anything else only the kind of error is shown.
+            failed.append(f"{name}: {e}" if isinstance(e, RuntimeError) else f"{name}: failed ({type(e).__name__})")
             if os.environ.get("OMASUDO_DEBUG"):
                 print(failed[-1], file=sys.stderr)
             continue

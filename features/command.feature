@@ -70,6 +70,17 @@ Feature: The omasudo command
       When the dialog of a copy in Omarchy's plugin folder loads
       Then ~/.local/bin/omasudo runs that copy
 
+    Scenario: The installed plugin takes over also when ~/.config is a symlink
+      Given my config folder is a symlink into a dotfiles folder
+      And ~/.local/bin/omasudo runs another omasudo checkout
+      When the dialog of a copy in Omarchy's plugin folder loads
+      Then ~/.local/bin/omasudo runs that copy
+
+    Scenario: A checkout linked into the plugin folder doesn't take over
+      Given ~/.local/bin/omasudo runs another omasudo checkout
+      When the dialog of a checkout linked into Omarchy's plugin folder loads
+      Then ~/.local/bin/omasudo still runs the other checkout
+
   Rule: After the plugin is removed, the command says what is left
 
     Scenario: The polkit rule is still installed

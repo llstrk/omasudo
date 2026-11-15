@@ -51,6 +51,20 @@ Feature: Reviewing a request
       When the agent asks to run "systemctl restart bluetooth"
       Then the dialog shows NO VERDICT "No reviewer answered (pi: exit 1; codex: exit 1); judge the command yourself."
 
+    Scenario: A reviewer that can't even be started is skipped
+      Given the config has the reviewers "pi, claude"
+      And pi's sessions folder is a file
+      And claude answers SAFE "Restarts Bluetooth."
+      When the agent asks to run "systemctl restart bluetooth"
+      Then the dialog shows SAFE "Restarts Bluetooth." by claude
+
+    Scenario: A config with agent settings of the wrong shape still works
+      Given the config has the reviewers "pi"
+      And the config's agent settings are ["pi"]
+      And pi answers SAFE "Restarts Bluetooth."
+      When the agent asks to run "systemctl restart bluetooth"
+      Then the dialog shows SAFE "Restarts Bluetooth." by pi
+
     Scenario: No AI review
       Given the config has no reviewers
       When the agent asks to run "systemctl restart bluetooth"
@@ -76,6 +90,37 @@ Feature: Reviewing a request
       When the agent asks to run "systemctl restart bluetooth --pretend-only"
       Then pi was told the man page does not document "--pretend-only"
 
+    Scenario: Options of sudo and other wrappers are not taken for the program
+      Given the config has the reviewers "pi"
+      And pi answers DANGEROUS "This is not a dry run."
+      When the agent asks to run "sudo -u root systemctl preset-all --dry-run"
+      Then pi was given the man-page entry for "--dry-run" of "systemctl"
+
+    Scenario: Commands joined without spaces are each looked at
+      Given the config has the reviewers "pi"
+      And pi answers DANGEROUS "Deletes /etc/x."
+      When the agent asks to run "systemctl stop foo;rm -rf /etc/x"
+      Then pi was given evidence for "rm"
+      And pi was given the units "foo.service"
+
+    Scenario: A program used twice is described once, with what both uses add
+      Given the config has the reviewers "pi"
+      And pi answers CAUTION "Unknown flag."
+      When the agent asks to run "systemctl status a; systemctl --omasudo-bogus b"
+      Then pi was told the man page does not document "--omasudo-bogus"
+
+    Scenario: A program without a man page used twice still has evidence
+      Given the config has the reviewers "pi"
+      And pi answers CAUTION "Unknown tool."
+      When the agent asks to run "omasudo-spec-tool a && omasudo-spec-tool --force b"
+      Then pi was given evidence for "omasudo-spec-tool"
+
+    Scenario: A stopped unit shows as inactive, not unknown
+      Given the config has the reviewers "pi"
+      And pi answers SAFE "Starts nothing."
+      When the agent asks to run "systemctl start omasudo-spec-nothing.service"
+      Then pi was told "omasudo-spec-nothing.service" is "inactive"
+
     Scenario: Named units come with their unit file
       Given the config has the reviewers "pi"
       And pi answers SAFE "Restarts the journal."
@@ -92,6 +137,16 @@ Feature: Reviewing a request
       When the agent asks to run "pkexec sh cleanup.sh"
       Then pi was given the contents of "cleanup.sh"
       And pi was given the man-page entry for "--dry-run" of "systemctl"
+
+  Rule: A cached verdict is only reused for the same reviewers
+
+    Scenario: Changing the reviewers changes the dialog's cache key
+      Given the config has the reviewers "pi"
+      And the dialog's cache key for "systemctl restart bluetooth" is noted
+      When I run "omasudo reviewer" and choose:
+        | claude      |
+        | No fallback |
+      Then the dialog's cache key for "systemctl restart bluetooth" has changed
 
   Rule: What leaves the machine is kept to the request
 

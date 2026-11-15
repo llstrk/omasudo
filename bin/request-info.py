@@ -119,9 +119,16 @@ def cache_key(action_id, subject, files):
     """Hash of action + exact argv + contents of any files named in argv.
 
     Lets the dialog reuse a recent verdict for an identical retry, but not when
-    e.g. `pkexec bash /tmp/x.sh` runs again after x.sh was edited."""
+    e.g. `pkexec bash /tmp/x.sh` runs again after x.sh was edited, or after
+    the reviewers were changed (omasudo's config is part of the key)."""
     h = hashlib.sha256()
     h.update(action_id.encode() + b"\0")
+    config = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "omasudo", "config.json")
+    try:
+        with open(config, "rb") as f:
+            h.update(b"C" + hashlib.sha256(f.read()).digest())
+    except OSError:
+        h.update(b"C-")
     for arg in subject["argv"]:
         h.update(arg.encode("utf-8", "surrogateescape") + b"\0")
     for _arg, path, st in files:

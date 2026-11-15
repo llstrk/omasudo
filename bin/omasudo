@@ -57,6 +57,14 @@ command_target() {
   sed -n 's/^# runs: //p' "$command_path" | head -n 1
 }
 
+# Whether this is the copy Omarchy installed: a real folder in its plugin
+# folder (a development checkout is linked in instead). The comparison
+# resolves symlinks above it, such as a ~/.config kept in a dotfiles repo.
+installed_copy() {
+  local dir=$plugins/llstrk.omasudo
+  [[ -d $dir && ! -L $dir && $(cd "$dir" && pwd -P) == "$here" ]]
+}
+
 # Writes the command, unless something else owns it: a file that is not ours,
 # or another checkout that still exists. The copy Omarchy installed takes the
 # command over from a development checkout (whose nest tests write the real
@@ -65,7 +73,7 @@ link_command() {
   local target script quoted
   if [[ -e $command_path || -L $command_path ]]; then
     target=$(command_target) || return 0
-    if [[ $target != "$here" && -x $target/bin/omasudo && $here != "$plugins/llstrk.omasudo" ]]; then
+    if [[ $target != "$here" && -x $target/bin/omasudo ]] && ! installed_copy; then
       return 0
     fi
   fi

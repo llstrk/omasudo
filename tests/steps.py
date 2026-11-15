@@ -348,7 +348,24 @@ def installed_copy_loads(ctx):
 
 @step("~/.local/bin/omasudo runs that copy")
 def runs_copy(ctx):
-    assert command_runs(ctx) == ctx.installed, command_runs(ctx)
+    assert command_runs(ctx) == ctx.installed.resolve(), command_runs(ctx)
+
+
+@step("my config folder is a symlink into a dotfiles folder")
+def config_symlinked(ctx):
+    dotfiles = ctx.tmp / "dotfiles" / ".config"
+    dotfiles.parent.mkdir()
+    ctx.config.rename(dotfiles)
+    ctx.config.symlink_to(dotfiles)
+
+
+@step("the dialog of a checkout linked into Omarchy's plugin folder loads")
+def linked_checkout_loads(ctx):
+    dev = copy_checkout(ctx.tmp / "dev checkout")
+    link = ctx.config / "omarchy" / "plugins" / "llstrk.omasudo"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(dev)
+    ctx.run_file(link / "bin" / "omasudo", "setup", "--auto")
 
 
 @step("I run the omasudo command with {args}")
@@ -525,6 +542,56 @@ def nobody_asked(ctx):
 def given_man_entry(ctx, agent, token, prog):
     entries = program(ctx, agent, prog)["man_entries"]
     assert token in entries and entries[token].startswith(token), list(entries)
+
+
+@step("{agent} was given evidence for {prog}")
+def given_evidence(ctx, agent, prog):
+    program(ctx, agent, prog)
+
+
+@step("{agent} was given the units {units}")
+def given_units(ctx, agent, units):
+    got = [u["unit"] for u in request_of(ctx, agent)["evidence"].get("units", [])]
+    assert got == names(units), got
+
+
+@step("{agent} was told {unit} is {state}")
+def told_state(ctx, agent, unit, state):
+    found = [u for u in request_of(ctx, agent)["evidence"].get("units", []) if u["unit"] == unit]
+    assert found and found[0]["active"] == state, found
+
+
+@step("{agent}'s sessions folder is a file")
+def sessions_is_file(ctx, agent):
+    folder = ctx.home / SETTINGS[agent]
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "sessions").write_text("not a folder\n")
+
+
+@step("the config's agent settings are {value}")
+def agent_settings(ctx, value):
+    ctx.write_config(agents=json.loads(value))
+
+
+def cache_key(ctx, command):
+    code = ("import importlib.util, shlex, sys\n"
+            "spec = importlib.util.spec_from_file_location('request_info', sys.argv[1])\n"
+            "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+            "print(m.cache_key('org.freedesktop.policykit.exec', {'argv': shlex.split(sys.argv[2])}, []))")
+    p = subprocess.run(["python3", "-I", "-c", code, str(ROOT / "bin" / "request-info.py"), command],
+                       env=ctx.env, capture_output=True, text=True, timeout=30)
+    assert p.returncode == 0, p.stderr
+    return p.stdout.strip()
+
+
+@step("the dialog's cache key for {command} is noted")
+def note_key(ctx, command):
+    ctx.noted_key = cache_key(ctx, command)
+
+
+@step("the dialog's cache key for {command} has changed")
+def key_changed(ctx, command):
+    assert cache_key(ctx, command) != ctx.noted_key
 
 
 @step("{agent} was told the man page does not document {flag}")
