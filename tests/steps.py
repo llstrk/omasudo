@@ -306,6 +306,11 @@ def prints(ctx, text):
     assert text in ctx.output(), ctx.output()
 
 
+@step("it ends without an error")
+def ends_ok(ctx):
+    assert ctx.last.returncode == 0, (ctx.last.returncode, ctx.output())
+
+
 @step("a floating terminal opens {text}")
 def terminal_opens(ctx, text):
     opened = [" ".join(c["args"]) for c in ctx.calls("omarchy-launch-floating-terminal-with-presentation")]

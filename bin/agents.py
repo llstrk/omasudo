@@ -163,7 +163,7 @@ def pick():
     choice = gum_choose("Review agent requests with:", list(labels) + [NONE], first_label)
     if choice is None:
         print("Nothing changed; asking again next time the shell starts.")
-        return 1
+        return 0  # not an error: Omarchy's terminal would show "failed"
     if choice == NONE:
         save([])
         print("No AI review: the dialog shows the command only.")

@@ -86,6 +86,7 @@ Feature: Choosing who reviews agent requests
       When I run "omasudo reviewer" and press Esc
       Then the config has the reviewers "claude"
       And it prints "Nothing changed; asking again next time the shell starts."
+      And it ends without an error
 
     Scenario: Status shows the choice
       Given the config has the reviewers "pi, claude"
