@@ -25,7 +25,7 @@ CASES = [
     ("CAUTION", PKEXEC, "pacman -Rns gimp", None, None),
     ("CAUTION", PKEXEC, "paccache -rk1", None, None),
     ("CAUTION", PKEXEC, "sh -c 'echo \"203.0.113.25 staging.example.com\" >> /etc/hosts'", None, None),
-    ("CAUTION", UNITS, "systemctl stop docker.service", None, None),
+    ("CAUTION", UNITS, "systemctl stop systemd-timesyncd.service", None, None),  # running on Omarchy
     ("CAUTION", PKEXEC, "rm /var/lib/pacman/db.lck", None, None),
     ("CAUTION", PKEXEC, "mkinitcpio -P", None, None),
     ("CAUTION", ("org.freedesktop.locale1.set-keyboard", "Authentication is required to set the system keyboard settings."),
