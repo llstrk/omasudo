@@ -86,8 +86,12 @@ class Context:
         entries = [json.loads(line) for line in self.log.read_text().splitlines() if line]
         return [e for e in entries if tool is None or e["tool"] == tool]
 
+    def reviews_by(self, name):
+        """The agent's review turns, without the calls that list its models."""
+        return [c for c in self.calls(name) if not c.get("listing")]
+
     def agent_call(self, name):
-        found = self.calls(name)
+        found = self.reviews_by(name)
         assert found, f"{name} was not run"
         return found[-1]
 
@@ -113,7 +117,7 @@ class Context:
         if answers is not None:
             (self.fake_dir / "gum-answers").write_text("".join(a + "\n" for a in answers))
         self.last = subprocess.run([str(ROOT / "bin" / "omasudo"), *words[1:]], env=self.env,
-                                   capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+                                   capture_output=True, text=True, timeout=180, stdin=subprocess.DEVNULL)
         return self.last
 
     def run_file(self, path, *args):
@@ -242,8 +246,27 @@ def config_no_reviewers(ctx):
 @step("the config sets {agent}'s model to {model} and effort to {effort}")
 def config_model(ctx, agent, model, effort):
     agents = ctx.read_config().get("agents", {})
-    agents[agent] = {"model": model, "effort": effort}
-    ctx.write_config(agents=agents)
+    if ctx.step.keyword in ("Given", "When"):
+        agents[agent] = {"model": model, "effort": effort}
+        ctx.write_config(agents=agents)
+    else:
+        assert agents.get(agent) == {"model": model, "effort": effort}, ctx.read_config()
+
+
+@step("the config sets {agent}'s model to {model} only")
+def config_model_only(ctx, agent, model):
+    assert ctx.read_config().get("agents", {}).get(agent) == {"model": model}, ctx.read_config()
+
+
+@step("the config has no settings for {agent}")
+def config_no_settings(ctx, agent):
+    assert agent not in ctx.read_config().get("agents", {}), ctx.read_config()
+
+
+@step("{call} prints:")
+def call_prints(ctx, call):
+    # What an agent's model listing prints (tests/fakebin.py), a row per line.
+    (ctx.fake_dir / call).write_text("\n".join(table_column(ctx)) + "\n")
 
 
 # ------------------------------------------------------------------ choosing
@@ -442,11 +465,36 @@ def first_starts(ctx, label):
     assert questions(ctx)[0]["selected"] == label, questions(ctx)[0]
 
 
+NTH = ["first", "second", "third", "fourth", "fifth", "sixth"]
+
+
 @step("the {nth} question is {header} and offers:")
 def nth_question(ctx, nth, header):
-    q = questions(ctx)[["first", "second", "third"].index(nth)]
+    q = questions(ctx)[NTH.index(nth)]
     assert q["header"] == header, q["header"]
     assert q["options"] == table_column(ctx), q["options"]
+
+
+@step("the {nth} question is {header}")
+def nth_header(ctx, nth, header):
+    assert questions(ctx)[NTH.index(nth)]["header"] == header, [q["header"] for q in questions(ctx)]
+
+
+@step("the {nth} question starts on {label}")
+def nth_starts(ctx, nth, label):
+    assert questions(ctx)[NTH.index(nth)]["selected"] == label, questions(ctx)[NTH.index(nth)]
+
+
+@step("the picker shows {label}")
+def picker_shows(ctx, label):
+    offered = [o for q in questions(ctx) for o in q["options"]]
+    assert label in offered, offered
+
+
+@step("the picker does not show {text}")
+def picker_hides(ctx, text):
+    offered = [o for q in questions(ctx) for o in q["options"]]
+    assert not [o for o in offered if text in o], offered
 
 
 @step("it prints {text}")
@@ -530,7 +578,7 @@ def shows_nothing(ctx):
 
 @step("{agent} was not asked")
 def not_asked(ctx, agent):
-    assert not ctx.calls(agent), ctx.calls(agent)
+    assert not ctx.reviews_by(agent), ctx.reviews_by(agent)
 
 
 @step("no reviewer was asked")
@@ -890,3 +938,58 @@ def could_not_write(ctx):
 def own_processes(ctx):
     count = int(re.search(r"processes (\d+)", ctx.last.stdout).group(1))
     assert count < 10, ctx.last.stdout
+
+
+# ------------------------------------------------------------------ omasudo test
+
+@step("{agent} judges these requests:")
+def judges(ctx, agent):
+    verdicts = {row[0]: row[1] for row in ctx.step.table}
+    (ctx.fake_dir / f"{agent}.verdicts").write_text(json.dumps(verdicts))
+
+
+def scored_rows(ctx):
+    """The test's table: request -> "ANSWER score" (the row's last cells)."""
+    rows = {}
+    for line in ctx.output().splitlines():
+        m = re.match(r"(\d+) (.+?) (SAFE|CAUTION|DANGEROUS) (SAFE|CAUTION|DANGEROUS|—) (good|okay|fail|no answer) \d+s$", line)
+        if m:
+            rows[m.group(2)] = (m.group(4), m.group(5))
+    return rows
+
+
+@step("the test scores:")
+def test_scores(ctx):
+    rows = scored_rows(ctx)
+    for request, answer, score in ctx.step.table:
+        assert rows.get(request) == (answer, score), (request, rows.get(request), rows)
+
+
+@step("the test scores every request {score}")
+def all_scored(ctx, score):
+    rows = scored_rows(ctx)
+    assert len(rows) == 16 and {s for _, s in rows.values()} == {score}, rows
+
+
+@step("it ends with an error")
+def ends_error(ctx):
+    assert ctx.last.returncode != 0, ctx.output()
+
+
+@step("every request went to {agent} with:")
+def every_request_with(ctx, agent):
+    turns = ctx.reviews_by(agent)
+    assert len(turns) == 16, len(turns)
+    for cell in table_column(ctx):
+        assert all(contains_run(t["args"], shlex.split(cell)) for t in turns), (cell, turns[0]["args"])
+
+
+@step("nothing but {agent} was run")
+def only_agent(ctx, agent):
+    others = {c["tool"] for c in ctx.calls()} - {agent, "omarchy-agent-account-exec"}
+    assert not others, others
+
+
+@step("{agent} was given the script saying {text}")
+def given_script(ctx, agent, text):
+    assert any(text in t["prompt"] and "files_named_in_command" in t["prompt"] for t in ctx.reviews_by(agent))

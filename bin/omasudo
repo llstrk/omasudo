@@ -8,6 +8,8 @@
 #                         or the reviewer choice is missing
 #   omasudo reviewer      choose which agents review requests, in order
 #   omasudo agents        coding agents found on this machine
+#   omasudo test [agent]  score a reviewer on requests with known answers
+#                         (the first reviewer if none is named)
 #   omasudo uninstall     remove the polkit rule
 #   omasudo update [--check|--off|--on]  new versions (see bin/update.py)
 set -uo pipefail
@@ -240,7 +242,7 @@ rule_step() {
 
 case ${1:-setup} in
   -h|--help|help)
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
     ;;
   status)
     echo "rule=$(rule_state)"
@@ -268,6 +270,10 @@ case ${1:-setup} in
   agents)
     agents list
     ;;
+  test)
+    shift
+    OMASUDO_ME=$(me) exec python3 -I "$here/bin/bench.py" "$@"
+    ;;
   update)
     shift
     exec python3 -I "$here/bin/update.py" "$@"
@@ -276,7 +282,7 @@ case ${1:-setup} in
     if [[ -x $UNINSTALLER ]]; then sudo "$UNINSTALLER"; else sudo "$here/system/uninstall.sh"; fi
     ;;
   *)
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

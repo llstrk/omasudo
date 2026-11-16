@@ -6,11 +6,14 @@ Usage:
   agents.py get             the chosen reviewers, one per line
   agents.py configured      exit 0 when a choice has been made (even "none")
   agents.py set [name...]   choose reviewers in order; no names = no AI review
-  agents.py pick            choose in the terminal with gum
+  agents.py pick            choose in the terminal with gum: reviewers, each
+                            one's model and reasoning level, then offers a test
 
 The choice lives in ~/.config/omasudo/config.json:
   {"reviewers": ["pi", "claude"], "agents": {"claude": {"model": "opus", "effort": "low"}}}
 The first reviewer is asked first; the next ones only when it can't answer.
+A model or level left out is the agent's own default (for Claude, omasudo's:
+reviewers.DEFAULTS).
 """
 import json
 import os
@@ -114,13 +117,46 @@ def load():
         return {}
 
 
-def save(names):
-    data = load()
-    data["reviewers"] = names
+def write(data):
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
     tmp = CONFIG.with_name(CONFIG.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=2) + "\n")
     os.replace(tmp, CONFIG)
+
+
+def save(names):
+    data = load()
+    data["reviewers"] = names
+    write(data)
+
+
+def settings(name):
+    """An agent's model and reasoning level from the config ({} = defaults)."""
+    confs = load().get("agents")
+    conf = confs.get(name) if isinstance(confs, dict) else None
+    return conf if isinstance(conf, dict) else {}
+
+
+def save_setting(name, model, effort):
+    """Sets an agent's model and level; "" removes it (the default). Other
+    keys the user put there are kept."""
+    data = load()
+    confs = data.get("agents") if isinstance(data.get("agents"), dict) else {}
+    conf = dict(confs.get(name)) if isinstance(confs.get(name), dict) else {}
+    for k, v in (("model", model), ("effort", effort)):
+        if v:
+            conf[k] = v
+        else:
+            conf.pop(k, None)
+    if conf:
+        confs[name] = conf
+    else:
+        confs.pop(name, None)
+    if confs:
+        data["agents"] = confs
+    else:
+        data.pop("agents", None)
+    write(data)
 
 
 # Colours by terminal palette number, so they follow the Omarchy theme.
@@ -149,7 +185,8 @@ def screen(*lines):
 
 
 def gum_choose(header, options, selected=None):
-    """options: [(label, value)]; returns the chosen value, None on Esc."""
+    """options: [(label, value)]; returns the chosen value, None on Esc.
+    selected must have no comma: gum splits --selected at commas."""
     # Omarchy's GUM_CHOOSE_* variables theme the rest.
     args = ["gum", "choose", "--header", "  " + header, "--label-delimiter", DELIM, "--cursor", "  › "]
     if selected:
@@ -170,12 +207,106 @@ def erase_gum_line():
 
 
 def option(a, width):
-    """An agent as a picker row: name, then a dot and what Omarchy knows."""
+    """An agent as a picker row: name, then a dot and what Omarchy knows, and
+    how its current model and level did in omasudo test."""
+    import bench
     ready = a["signedIn"] is not False
     status = paint("●", GOOD) + " " + ("signed in" if a["signedIn"] else "installed") if ready \
         else paint("○ not signed in", WARN)
     extra = paint("  Omarchy default", ACCENT) if a["default"] else ""
-    return f"{paint(a['name'].ljust(width), bold=ready)}  {status}{extra}"
+    return f"{paint(a['name'].ljust(width), bold=ready)}  {status}{extra}" \
+        + tested(bench.result(a["name"], *bench.setting(a["name"], settings(a["name"]))))
+
+
+def tested(result, level=None):
+    """'  tested 13/16 good' for a picker row; nothing when never tested."""
+    import bench
+    if not result:
+        return ""
+    text = bench.summary(result) + (f" at {level}" if level else "")
+    return "  " + paint(text, WARN if result.get("fail") or result.get("none") else MUTED)
+
+
+DEFAULT = "(default)"  # the value of a "Default" row: no setting
+
+
+def choose_setting(name, chosen):
+    """The Model screen, then the Reasoning screen when the model has levels.
+    Saves the choice; Esc keeps what was set."""
+    import bench
+    import models
+    conf = settings(name)
+    own = reviewers.DEFAULTS.get(name, {})
+    progress = ["Reviews  " + order(chosen) + paint("  → …", MUTED), ""]
+    screen(*progress, paint(f"Asking {name} which models it has…", MUTED))
+    offer = models.offer(name)
+    if not offer["models"]:
+        return  # it lists none: nothing to choose
+    current = conf.get("model", "")
+
+    def model_row(label, model_key):
+        r, level = bench.latest_for_model(name, model_key)
+        return label + tested(r, level)
+
+    rows = [(model_row(paint("Default", bold=True) + "  " + paint(own.get("model") or f"{name}'s own default", MUTED),
+                       own.get("model", "")), DEFAULT)]
+    rows += [(model_row(m["label"] + (paint(f"  {m['id']}", MUTED) if m["label"] != m["id"] else ""), m["id"]), m["id"])
+             for m in offer["models"]]
+    if current and current not in [m["id"] for m in offer["models"]]:
+        rows.append((model_row(current + paint("  current", MUTED), current), current))
+    screen(*progress, f"Which {name} model reviews. Bigger models judge better but answer slower.", "")
+    start = next((l for l, v in rows if v == (current or DEFAULT)), None)
+    picked = gum_choose(f"Model for {name}", rows, start)
+    if picked is None:
+        return
+    model = "" if picked == DEFAULT else picked
+    found = next((m for m in offer["models"] if m["id"] == model), None)
+    efforts = found["efforts"] if found else offer["efforts"] if not model else []
+    effort = conf.get("effort", "") if model == current else ""
+    if efforts:
+        model_key = model or own.get("model", "")
+        # omasudo's own level applies to any model (bench.setting does the same).
+        own_level = own.get("effort") or (found and found["default_effort"])
+        rows = [(paint("Default", bold=True) + "  " + paint(own_level or f"{name}'s own default", MUTED)
+                 + tested(bench.result(name, model_key, own.get("effort", ""))), DEFAULT)]
+        rows += [(level + tested(bench.result(name, model_key, level)), level) for level in efforts]
+        screen(*progress, f"How long {name} thinks before answering. More is slower, and usually",
+               "more careful; omasudo test shows how a level does.", "")
+        start = next((l for l, v in rows if v == (effort if effort in efforts else DEFAULT)), None)
+        level = gum_choose(f"Reasoning for {name} · {model or 'default model'}", rows, start)
+        if level is not None:
+            effort = "" if level == DEFAULT else level
+    else:
+        effort = ""
+    save_setting(name, model, effort)
+
+
+def setting_line(name, width):
+    """'pi        tensorfold/qwen, high  tested 13/16 good' for the Saved screen."""
+    import bench
+    model, effort = bench.setting(name, settings(name))
+    text = ", ".join([model or "its default model", effort or "its default level"])
+    return paint(name.ljust(width), bold=True) + "  " + text + tested(bench.result(name, model, effort))
+
+
+def offer_test(chosen):
+    """After the choice: test the first reviewer, or all, against requests
+    with known answers (bin/bench.py)."""
+    import bench
+    rows = [(f"Test {chosen[0]}" + paint(f"  {len(bench.CASES)} requests · a few minutes (longer on a local model)", MUTED),
+             "first")]
+    if len(chosen) > 1:
+        rows.append((f"Test all  " + order(chosen), "all"))
+    rows.append(("Later" + paint(f"  run {pretty_path()} test", MUTED), "later"))
+    print(paint(f"  omasudo knows the right answer to {len(bench.CASES)} root requests. A test shows how", MUTED))
+    print(paint("  this choice judges them; nothing is run.", MUTED))
+    print()
+    picked = gum_choose("Test it now?", rows)
+    if picked not in ("first", "all"):
+        return
+    for name in chosen[:1] if picked == "first" else chosen:
+        bench.test(name, settings(name))
+    print()
 
 
 def pick():
@@ -222,6 +353,7 @@ def pick():
         return 0
 
     chosen = [choice]
+    choose_setting(choice, chosen)
     while True:
         rest = [(l, n) for l, n in rows[:-1] if n not in chosen]
         if not rest:
@@ -234,9 +366,12 @@ def pick():
         if nxt is None or nxt == "none":
             break
         chosen.append(nxt)
+        choose_setting(nxt, chosen)
     save(chosen)
-    screen(paint("✓ Saved", GOOD, bold=True), "", "Reviews  " + order(chosen), "", change)
-    print()
+    named = max(len(n) for n in chosen)
+    screen(paint("✓ Saved", GOOD, bold=True), "", "Reviews  " + order(chosen), "",
+           *[setting_line(n, named) for n in chosen], "", change, "")
+    offer_test(chosen)
     return 0
 
 

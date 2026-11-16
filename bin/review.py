@@ -152,26 +152,9 @@ def ask(name, prompt, conf, deadline):
     return data
 
 
-def main():
-    try:
-        req = json.loads(sys.argv[1])
-    except (IndexError, ValueError):
-        emit("ERROR", "Bad review request.")
-        return
-
-    config = agents.load()
-    names = config.get("reviewers")
-    if not isinstance(names, list):
-        emit("ERROR", "No reviewer chosen yet: run omasudo reviewer.")
-        return
-    names = [n for n in names if n in reviewers.SUPPORTED]
-    if not names:
-        emit("OFF", "")
-        return
-
-    # The budget covers evidence too: the dialog counts on a verdict, or why
-    # there is none, within it.
-    deadline = time.monotonic() + BUDGET
+def request_prompt(req):
+    """The reviewer's prompt for a request, with evidence, and the redacted
+    command."""
     command = redact(req.get("command", ""))
     body = {
         "polkit_action": req.get("actionId", ""),
@@ -192,7 +175,30 @@ def main():
         body["evidence"] = {"error": "could not gather evidence"}
     # json.dumps already escapes non-ASCII (so bidi tricks arrive as \uXXXX);
     # also escape "@" so nothing in the request can act as an @file mention.
-    prompt = "<request>\n" + json.dumps(body, indent=2).replace("@", "\\u0040") + "\n</request>"
+    return "<request>\n" + json.dumps(body, indent=2).replace("@", "\\u0040") + "\n</request>", command
+
+
+def main():
+    try:
+        req = json.loads(sys.argv[1])
+    except (IndexError, ValueError):
+        emit("ERROR", "Bad review request.")
+        return
+
+    config = agents.load()
+    names = config.get("reviewers")
+    if not isinstance(names, list):
+        emit("ERROR", "No reviewer chosen yet: run omasudo reviewer.")
+        return
+    names = [n for n in names if n in reviewers.SUPPORTED]
+    if not names:
+        emit("OFF", "")
+        return
+
+    # The budget covers evidence too: the dialog counts on a verdict, or why
+    # there is none, within it.
+    deadline = time.monotonic() + BUDGET
+    prompt, command = request_prompt(req)
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)

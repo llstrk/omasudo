@@ -24,6 +24,8 @@ import jail
 
 SUPPORTED = ["claude", "codex", "pi", "omp", "opencode", "grok"]
 ACCOUNT_PROVIDERS = {"claude", "codex", "grok"}
+# omasudo's own choice where it has one; other agents use their own defaults.
+DEFAULTS = {"claude": {"model": "opus", "effort": "low"}}
 
 SCHEMA = {
     "type": "object",
@@ -96,8 +98,8 @@ def with_account(name, argv):
 
 
 def claude(prompt, workdir, conf):
-    model = conf.get("model", "opus")
-    effort = conf.get("effort", "low")
+    model = conf.get("model", DEFAULTS["claude"]["model"])
+    effort = conf.get("effort", DEFAULTS["claude"]["effort"])
     argv = [
         "claude", "-p",
         *(["--model", model] if model else []),

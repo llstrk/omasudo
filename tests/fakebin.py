@@ -12,7 +12,13 @@ or the desktop. What the scenario steers lives in $FAKE_DIR:
                        running out is Esc
   grok-home            what `omarchy-agent-account-home grok` prints
   <agent>.answer       what that agent replies (a JSON verdict or plain text)
+  <agent>.verdicts     JSON {"part of a command": verdict}: per request, the
+                       verdict for the first part the requested command
+                       contains; others get <agent>.answer
   <agent>.fails        that agent exits 1
+  "<agent> <args>"     what that call prints, for the calls that list models
+                       (`pi --list-models`, `claude --help`, ...); without
+                       the file they print nothing
 """
 
 import json
@@ -58,6 +64,8 @@ if tool == "gum":
             else:
                 rest.append(a)
         options = [a.split(delim, 1) if delim and delim in a else [a, a] for a in rest]
+        # Real gum splits --selected at commas: such a label selects nothing.
+        assert "," not in (option("--selected") or ""), f"gum: --selected has a comma: {option('--selected')!r}"
         labels = [plain(label) for label, _ in options]
         log(header=plain(option("--header")), selected=plain(option("--selected")) or None,
             options=labels, values=[v for _, v in options])
@@ -114,6 +122,16 @@ if tool == "omarchy-agent-account-exec":
     log()
     os.execvpe(args[0], args, {**os.environ, "FAKE_VIA_ACCOUNT": "1"})
 
+LISTINGS = (["--help"], ["--list-models"], ["models"], ["models", "--json"], ["debug", "models"],
+            ["debug", "models", "--bundled"])
+
+if tool in AGENTS and args in LISTINGS:
+    log(listing=True)
+    printed = fake_dir / f"{tool} {' '.join(args)}"
+    if printed.exists():
+        print(printed.read_text(), end="")
+    sys.exit(0)
+
 if tool in AGENTS:
     prompt = sys.stdin.read() if not sys.stdin.isatty() else ""
     if option("--prompt-file"):
@@ -130,6 +148,13 @@ if tool in AGENTS:
         sys.exit(1)
     answer_file = fake_dir / f"{tool}.answer"
     answer = answer_file.read_text() if answer_file.exists() else ""
+    verdicts = fake_dir / f"{tool}.verdicts"
+    if verdicts.exists():
+        m = re.search(r'"requesting_command": ("(?:[^"\\]|\\.)*")', prompt)
+        command = json.loads(m.group(1)) if m else ""
+        hit = next((v for part, v in json.loads(verdicts.read_text()).items() if part in command), None)
+        if hit:
+            answer = json.dumps({"verdict": hit, "summary": f"{hit} by the fake", "details": ""})
     if tool == "claude":
         try:
             print(json.dumps({"structured_output": json.loads(answer)}))

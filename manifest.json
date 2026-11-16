@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "llstrk.omasudo",
   "name": "Omasudo",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": "llstrk",
   "description": "The sudo password popup that shows what you're approving: the requesting command and, for coding-agent requests, a verdict from the agent you choose.",
   "omarchy": {
