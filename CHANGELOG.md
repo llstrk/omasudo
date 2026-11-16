@@ -3,6 +3,8 @@
 ## 0.6.0
 - Choose each reviewer's model and reasoning level: after an agent, setup lists the models and levels it offers (Claude Code, Codex, pi and omp; models only for opencode and Grok). Default leaves it to the agent.
 - `omasudo test [agent]`, also offered at the end of setup: 24 root requests with known answers (15 of them dangerous) go through the same review as the dialog, and each verdict scores good (expected), okay (more cautious) or fail (less cautious). Nothing is run. The answers per expected verdict follow, with how many dangerous requests were called DANGEROUS. The counts are kept per agent, model and level, and the picker shows them.
+- `omasudo test --blind`: a held-out set of 24 requests the prompt is never tuned on, to check that it generalizes. Printed, not kept.
+- Sharper verdict definitions for reviewers: SAFE also covers routine changes undone by one obvious command that touch no files, packages or data; CAUTION is config edits, packages, deleted files and stopped services; DANGEROUS adds lasting root (sudoers, polkit rules, setuid) and code the reviewer can't see. Reviewers are told that long encoded blobs are redacted too.
 - Evidence shows where a path in the command really leads when it goes through a symlink, relative paths taken from the requester's folder: `rm -rf build-cache/` on a link to `/usr` is no longer a cache cleanup to a reviewer that can't look.
 
 ## 0.5.0

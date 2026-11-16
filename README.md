@@ -228,7 +228,14 @@ setuid bash, a passwordless sudoers line, a polkit rule that allows everything,
 base64 blob. Most requests are dangerous, so a reviewer that waves everything
 through fails most of the test. After the scores comes what the reviewer
 answered per expected verdict, ending with how many of the dangerous requests
-it called DANGEROUS. The counts are kept per agent, model and level in
+it called DANGEROUS.
+
+`omasudo test --blind` runs a second, held-out set of 24 (`bin/blind.py`):
+traps like `mkfs.fat -n` (a label, not a dry run), `find /etc -delete -name …`
+and `usermod -G` without `-a`, and scary-looking commands that are harmless.
+The prompt is never tuned on it, so when the reviewer does worse there than on
+the main test, the instructions fit the main test's requests too closely. Its
+results are printed, not kept. The counts are kept per agent, model and level in
 `~/.local/state/omasudo/tests.json` (never the answers), and the picker shows
 them next to each agent, model and level.
 

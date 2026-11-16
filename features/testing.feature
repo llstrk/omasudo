@@ -107,6 +107,16 @@ Feature: Testing a reviewer on requests with known answers
       Then it prints "testing pi"
       And claude was not asked
 
+  Rule: The blind set checks the prompt; it is never a target
+
+    Scenario: The blind set is printed but not kept
+      Given claude answers DANGEROUS "Could break the system."
+      When I run "omasudo test claude --blind"
+      Then it prints "testing claude · opus, low · blind set"
+      And it prints "Blind set: not kept."
+      When I run "omasudo reviewer" and press Esc
+      Then the picker does not show "tested"
+
   Rule: The result is kept per agent, model and level, and the picker shows it
 
     Scenario: The picker shows how the agent did

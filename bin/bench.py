@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """omasudo test: how well a reviewer judges root requests with known answers.
 
-Usage: bench.py [agent...] [--model M] [--effort E]
+Usage: bench.py [agent...] [--model M] [--effort E] [--blind]
   No agent: the first chosen reviewer. --model and --effort override the
-  config for this run.
+  config for this run. --blind runs the blind set (bin/blind.py) instead.
 
 Each request below goes through the same review the password dialog uses,
 with the agent's model and reasoning level from the config. Nothing is run:
@@ -15,6 +15,9 @@ the requests are only reviewed. A verdict is scored against the expected one:
 
 The counts (never the reviewers' answers) are kept per agent, model and
 reasoning level in ~/.local/state/omasudo/tests.json; the picker shows them.
+
+The requests here are the ones the reviewer prompt is tuned against. The blind
+set checks that the tuning generalizes: its results are printed, never kept.
 """
 import hashlib
 import json
@@ -86,13 +89,13 @@ CASES = [
 VERSION = hashlib.sha256(json.dumps([CASES]).encode()).hexdigest()[:12]
 
 
-def requests(folder):
+def requests(folder, cases=CASES):
     """(expected, label, request) per case. Scripts are written into folder,
     and the requester works in a folder of its own holding the case's links.
     Nothing here follows a link: the temporary folder is removed with its
     links, never what they point to."""
     out = []
-    for n, (expected, (action, message), command, script, links) in enumerate(CASES):
+    for n, (expected, (action, message), command, script, links) in enumerate(cases):
         files, name, label = [], None, None
         cwd = Path(folder) / f"case-{n}"
         cwd.mkdir()
@@ -105,7 +108,7 @@ def requests(folder):
             path.write_text(script)
             files = [str(path)]
             command = command.replace(name, str(path))
-        label = label or (f'sh {name}, a "dry run only" script' if script else command)
+        label = label or (f"sh {name} (a script)" if script else command)
         out.append((expected, label, {"actionId": action, "message": message, "command": command,
                                       "chain": ["claude", "bash", command.split()[0]], "files": files,
                                       "cwd": str(cwd)}))
@@ -193,27 +196,31 @@ def interrupt(*_):
     raise KeyboardInterrupt
 
 
-def test(agent, conf):
-    """Runs every request past one agent, prints each score, saves the counts.
-    Returns the counts, or None when stopped."""
+def test(agent, conf, blind_set=False):
+    """Runs every request past one agent, prints each score, saves the counts
+    (not for the blind set). Returns the counts, or None when stopped."""
     model, effort = setting(agent, conf)
+    if blind_set:
+        import blind  # imports this module's request kinds
+    cases = blind.CASES if blind_set else CASES
     print()
-    print(f"  {agents.BADGE}  testing {paint(described(agent, model, effort), bold=True)}")
+    print(f"  {agents.BADGE}  testing {paint(described(agent, model, effort), bold=True)}"
+          + (paint(" · blind set", bold=True) if blind_set else ""))
     print()
     if not agents.installed(agent):
         print(paint(f"  {agent} is not installed.", WARN))
         return None
-    print(paint(f"  {len(CASES)} requests with known answers. Nothing is run: each is only reviewed,", MUTED))
+    print(paint(f"  {len(cases)} requests with known answers. Nothing is run: each is only reviewed,", MUTED))
     print(paint("  as in the password dialog. Ctrl+C stops.", MUTED))
     print()
     print(paint(f"  {'#':>2}  {'request':<44} {'expected':<10} {'answer':<10} score", MUTED))
-    counts = {"good": 0, "okay": 0, "fail": 0, "none": 0, "total": len(CASES)}
+    counts = {"good": 0, "okay": 0, "fail": 0, "none": 0, "total": len(cases)}
     answers = {e: {v: 0 for v in [*RANK, None]} for e in RANK}  # expected -> answer -> how many
     started = time.monotonic()
     previous = signal.signal(signal.SIGINT, interrupt)
     try:
         with tempfile.TemporaryDirectory(prefix="omasudo-test-", dir=os.environ.get("XDG_RUNTIME_DIR")) as folder:
-            for i, (expected, label, req) in enumerate(requests(folder), 1):
+            for i, (expected, label, req) in enumerate(requests(folder, cases), 1):
                 shown = label if len(label) <= 44 else label[:43] + "…"
                 print(f"  {i:>2}  {shown:<44} {expected:<10} ", end="", flush=True)
                 t = time.monotonic()
@@ -247,7 +254,10 @@ def test(agent, conf):
     print("  " + paint(" · ", MUTED).join(parts) + paint(f"   in {took // 60}m {took % 60}s", MUTED))
     print()
     breakdown(answers)
-    if counts["none"] < counts["total"]:
+    if blind_set:
+        print(paint("  Blind set: not kept. Never tune the prompt on it; when it does worse than", MUTED))
+        print(paint("  the main test, the instructions fit the main test's requests too closely.", MUTED))
+    elif counts["none"] < counts["total"]:
         save(agent, model, effort, counts)
         print(paint(f"  The picker shows this next to {agent}.", MUTED))
     return counts
@@ -268,9 +278,12 @@ def breakdown(answers):
 
 
 def main(argv):
-    names, overrides, i = [], {}, 0
+    names, overrides, i, blind_set = [], {}, 0, False
     while i < len(argv):
-        if argv[i] in ("--model", "--effort") and i + 1 < len(argv):
+        if argv[i] == "--blind":
+            blind_set = True
+            i += 1
+        elif argv[i] in ("--model", "--effort") and i + 1 < len(argv):
             overrides[argv[i][2:]] = argv[i + 1]
             i += 2
         elif argv[i] in ("-h", "--help"):
@@ -293,7 +306,7 @@ def main(argv):
     ok = True
     for name in names:
         conf = {**(confs.get(name) if isinstance(confs.get(name), dict) else {}), **overrides}
-        counts = test(name, conf)
+        counts = test(name, conf, blind_set)
         ok = ok and counts is not None and not counts["fail"] and not counts["none"]
     return 0 if ok else 1
 
