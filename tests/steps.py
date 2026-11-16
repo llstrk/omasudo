@@ -1021,6 +1021,25 @@ def symlink_to(ctx, name, target):
     (ctx.tmp / name).symlink_to(target)
 
 
+@step("{agent}'s safeguards flag reviews on {models}")
+def safeguards_flag(ctx, agent, models):
+    (ctx.fake_dir / f"{agent}.flags").write_text("\n".join(names(models)) + "\n")
+
+
+def models_asked(ctx, agent):
+    return [t["args"][t["args"].index("--model") + 1] if "--model" in t["args"] else "" for t in ctx.reviews_by(agent)]
+
+
+@step("{agent} was asked on {first}, then on {second}")
+def asked_on_then(ctx, agent, first, second):
+    assert models_asked(ctx, agent) == [first, second], models_asked(ctx, agent)
+
+
+@step("{agent} was asked on {model}")
+def asked_on(ctx, agent, model):
+    assert models_asked(ctx, agent) == [model], models_asked(ctx, agent)
+
+
 @step("{agent} was given the script saying {text}")
 def given_script(ctx, agent, text):
     assert any(text in t["prompt"] and "files_named_in_command" in t["prompt"] for t in ctx.reviews_by(agent))

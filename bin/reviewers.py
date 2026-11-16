@@ -90,7 +90,37 @@ CLAUDE_SETTINGS = {
         "allowUnsandboxedCommands": False,  # no dangerouslyDisableSandbox escape
         "network": {"allowAllUnixSockets": True},
     },
+    # Claude Code's own switch when safeguards flag a message. It does not
+    # fire in -p yet, so refusal_fallback below does the same switch.
+    "switchModelsOnFlag": True,
 }
+
+# The model Claude Code switches to when its safeguards flag a message as
+# cyber (code.claude.com/docs/en/model-config#automatic-model-fallback).
+# Reviewing a dangerous root command can trip them; the review is defensive,
+# so it is asked again on that model rather than giving no verdict.
+REFUSAL_FALLBACK = {
+    "opus": "claude-opus-4-8", "claude-opus-5-5": "claude-opus-4-8", "claude-opus-5": "claude-opus-4-8",
+    "sonnet": "claude-sonnet-5", "claude-sonnet-5-5": "claude-sonnet-5",
+}
+
+
+def refused(name, out):
+    """Whether the agent's safeguards refused the review (Claude Code's JSON
+    result says stop_reason "refusal")."""
+    if name != "claude":
+        return False
+    try:
+        return json.loads(out).get("stop_reason") == "refusal"
+    except (ValueError, AttributeError):
+        return False
+
+
+def refusal_fallback(name, conf):
+    """The model to ask after a refusal, or None."""
+    if name != "claude":
+        return None
+    return REFUSAL_FALLBACK.get(conf.get("model") or DEFAULTS["claude"]["model"])
 
 CODEX_OFF = ["shell_tool", "unified_exec", "view_image", "web_search_request", "standalone_web_search", "apps"]
 

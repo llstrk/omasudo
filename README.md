@@ -59,6 +59,13 @@ agent. You can pick fallbacks in order, tried only when the one before can't
 answer (not installed, signed out, offline, timed out), or **No AI review** to
 see the command only.
 
+Reviewing a dangerous command can trip Claude's cyber safeguards, which then
+decline the review. In a session Claude Code switches models when that
+happens, but `claude -p` gives up, so omasudo asks again on the model Claude
+Code would switch to: Opus 4.8 for Opus, Sonnet 5 for Sonnet. The dialog names
+it ("by claude (claude-opus-4-8)"). If that is flagged too, the next reviewer
+is tried.
+
 After each agent come its model and reasoning level, from what the agent
 lists: Claude Code's model aliases and effort levels (`claude --help`),
 Codex's model catalog with each model's levels (`codex debug models`), pi's

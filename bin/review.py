@@ -116,7 +116,28 @@ def stop(*_):
 
 
 def ask(name, prompt, conf, deadline):
-    """One reviewer's answer, or raise with a short reason (no request text)."""
+    """One reviewer's answer, or raise with a short reason (no request text).
+    When the agent's safeguards refuse the review, it is asked again on the
+    model the agent itself switches to; the answer then says which in
+    "fallback_model"."""
+    try:
+        return ask_once(name, prompt, conf, deadline)
+    except Refused:
+        model = reviewers.refusal_fallback(name, conf)
+        if not model or time.monotonic() > deadline - 5:
+            raise RuntimeError("safeguards declined to review")
+        try:
+            data = ask_once(name, prompt, {**conf, "model": model}, deadline)
+        except Refused:
+            raise RuntimeError(f"safeguards declined to review, also on {model}")
+        return {**data, "fallback_model": model}
+
+
+class Refused(RuntimeError):
+    pass
+
+
+def ask_once(name, prompt, conf, deadline):
     if not agents.installed(name):
         raise RuntimeError("not installed")
     with tempfile.TemporaryDirectory(prefix="omasudo-", dir=os.environ.get("XDG_RUNTIME_DIR")) as cwd:
@@ -141,6 +162,8 @@ def ask(name, prompt, conf, deadline):
             raise RuntimeError("timed out")
         finally:
             current["proc"] = None
+        if reviewers.refused(name, out):
+            raise Refused()
         if proc.returncode != 0:
             raise RuntimeError(f"exit {proc.returncode}")
         try:
@@ -218,8 +241,9 @@ def main():
             if os.environ.get("OMASUDO_DEBUG"):
                 print(failed[-1], file=sys.stderr)
             continue
+        shown = f"{name} ({data['fallback_model']})" if data.get("fallback_model") else name
         emit(data["verdict"], visible(str(data.get("summary", ""))[:400]),
-             visible(str(data.get("details", ""))[:1500], keep="\n"), command, name)
+             visible(str(data.get("details", ""))[:1500], keep="\n"), command, shown)
         return
     emit("ERROR", "No reviewer answered (" + "; ".join(failed) + "); judge the command yourself.")
 

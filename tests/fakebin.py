@@ -16,6 +16,8 @@ or the desktop. What the scenario steers lives in $FAKE_DIR:
                        verdict for the first part the requested command
                        contains; others get <agent>.answer
   <agent>.fails        that agent exits 1
+  <agent>.flags        models (one per line, as given to --model, "" for none)
+                       on which that agent's safeguards refuse every review
   "<agent> <args>"     what that call prints, for the calls that list models
                        (`pi --list-models`, `claude --help`, ...); without
                        the file they print nothing
@@ -145,6 +147,11 @@ if tool in AGENTS:
         env={k: v for k, v in os.environ.items()
              if k.startswith("OPENCODE_") or k in ("GROK_HOME", "PI_CODING_AGENT_DIR", "HOME")})
     if (fake_dir / f"{tool}.fails").exists():
+        sys.exit(1)
+    flags = fake_dir / f"{tool}.flags"
+    if flags.exists() and (option("--model") or "") in flags.read_text().splitlines():
+        print(json.dumps({"type": "result", "is_error": True, "stop_reason": "refusal",
+                          "result": "API Error: the model's safeguards flagged this session"}))
         sys.exit(1)
     answer_file = fake_dir / f"{tool}.answer"
     answer = answer_file.read_text() if answer_file.exists() else ""

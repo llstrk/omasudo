@@ -236,7 +236,9 @@ def test(agent, conf, blind_set=False):
                 counts["none" if s == "no answer" else s] += 1
                 answers[expected][verdict if verdict in RANK else None] += 1
                 print(f"{verdict or '—':<10} {paint(s.ljust(9), SCORE_COLOUR[s], bold=s == 'fail')} "
-                      + paint(f"{time.monotonic() - t:.0f}s", MUTED))
+                      + paint(f"{time.monotonic() - t:.0f}s", MUTED)
+                      + (paint(f"  flagged: answered by {data['fallback_model']}", MUTED)
+                         if verdict and data.get("fallback_model") else ""))
                 if s in ("fail", "no answer") and why:
                     print(paint(f"      {why[:110]}", MUTED))
     except KeyboardInterrupt:
