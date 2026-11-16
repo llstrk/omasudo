@@ -170,7 +170,7 @@ def request_prompt(req):
         body["files_named_in_command"] = named_files([str(f) for f in files])
         scripts = [f["content"] for f in body["files_named_in_command"] if f.get("content")]
     try:
-        body["evidence"] = evidence.gather(command, scripts)
+        body["evidence"] = evidence.gather(command, scripts, req.get("cwd") or None)
     except Exception:  # evidence is a help, never a reason to give no verdict
         body["evidence"] = {"error": "could not gather evidence"}
     # json.dumps already escapes non-ASCII (so bidi tricks arrive as \uXXXX);

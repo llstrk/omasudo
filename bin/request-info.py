@@ -94,13 +94,16 @@ def join(argv):
     return s if len(s) <= MAX_CMD else s[:MAX_CMD] + " …"
 
 
+def folder_of(subject):
+    try:
+        return os.readlink(f"/proc/{subject['pid']}/cwd")
+    except OSError:
+        return None  # setuid pkexec: cwd not readable; relative paths fall back to ours
+
+
 def named_files(subject):
     """(arg, path, stat) for each argv element that names an existing regular file."""
-    cwd = None
-    try:
-        cwd = os.readlink(f"/proc/{subject['pid']}/cwd")
-    except OSError:
-        pass  # setuid pkexec: cwd not readable; relative paths fall back to ours
+    cwd = folder_of(subject)
     out = []
     for arg in subject["argv"][1:]:
         if not arg or arg.startswith("-") or len(arg) > 4096:
@@ -218,6 +221,7 @@ def main():
         # Raw paths (not for display): review.py reads these and inlines them,
         # because the reviewer itself cannot read $HOME or /tmp.
         "files": [path for _a, path, _s in files[:MAX_FILES]],
+        "cwd": folder_of(subject) or "",  # for relative paths in the evidence
         "agent": agent,
     })
     print(json.dumps(out))

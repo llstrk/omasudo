@@ -135,7 +135,8 @@ class Context:
                 command = " ".join(str(path) if w == name else w for w in command.split())
                 files.append(str(path))
         request = {"actionId": "org.freedesktop.policykit.exec", "message": "Authentication is required",
-                   "command": command, "chain": ["claude", "bash", command.split()[0]], "files": files}
+                   "command": command, "chain": ["claude", "bash", command.split()[0]], "files": files,
+                   "cwd": str(self.tmp)}  # as request-info.py finds it
         self.last = subprocess.run(["python3", "-I", str(ROOT / "bin" / "review.py"), json.dumps(request)],
                                    env=self.env, capture_output=True, text=True, timeout=120)
         assert self.last.returncode == 0, self.last.stderr
@@ -958,6 +959,20 @@ def scored_rows(ctx):
     return rows
 
 
+TEST_REQUESTS = 24
+
+
+@step("the answers by expected verdict are:")
+def answers_by_expected(ctx):
+    """Rows: expected, then how many it called SAFE, CAUTION, DANGEROUS, and
+    how many got no answer."""
+    lines = ctx.output().splitlines()
+    for expected, *counts in ctx.step.table:
+        row = next((l for l in lines if l.split()[:1] == [expected] and l.split()[1:2] and l.split()[1].startswith("(")), None)
+        assert row, (expected, ctx.output())
+        assert row.split()[2:] == counts, (expected, row)
+
+
 @step("the test scores:")
 def test_scores(ctx):
     rows = scored_rows(ctx)
@@ -968,7 +983,7 @@ def test_scores(ctx):
 @step("the test scores every request {score}")
 def all_scored(ctx, score):
     rows = scored_rows(ctx)
-    assert len(rows) == 16 and {s for _, s in rows.values()} == {score}, rows
+    assert len(rows) == TEST_REQUESTS and {s for _, s in rows.values()} == {score}, rows
 
 
 @step("it ends with an error")
@@ -979,7 +994,7 @@ def ends_error(ctx):
 @step("every request went to {agent} with:")
 def every_request_with(ctx, agent):
     turns = ctx.reviews_by(agent)
-    assert len(turns) == 16, len(turns)
+    assert len(turns) == TEST_REQUESTS, len(turns)
     for cell in table_column(ctx):
         assert all(contains_run(t["args"], shlex.split(cell)) for t in turns), (cell, turns[0]["args"])
 
@@ -988,6 +1003,22 @@ def every_request_with(ctx, agent):
 def only_agent(ctx, agent):
     others = {c["tool"] for c in ctx.calls()} - {agent, "omarchy-agent-account-exec"}
     assert not others, others
+
+
+@step("{agent} was told {path} leads to {target}")
+def told_leads_to(ctx, agent, path, target):
+    found = []
+    for turn in ctx.reviews_by(agent):
+        m = re.search(r"<request>\n(.*)\n</request>", turn["prompt"], re.S)
+        found += json.loads(m.group(1))["evidence"].get("paths_through_symlinks", []) if m else []
+    match = [p for p in found if p["path"] == path]
+    assert match and match[0]["leads_to"] == target and match[0]["is_symlink"], found
+    assert match[0].get("trailing_slash", False) == path.endswith("/"), match
+
+
+@step("{name} is a symlink to {target}")
+def symlink_to(ctx, name, target):
+    (ctx.tmp / name).symlink_to(target)
 
 
 @step("{agent} was given the script saying {text}")

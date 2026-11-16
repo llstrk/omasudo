@@ -127,6 +127,20 @@ Feature: Reviewing a request
       When the agent asks to run "systemctl restart systemd-journald"
       Then pi was given the unit file of "systemd-journald.service"
 
+    Scenario: A path through a symlink comes with where it really leads
+      Given the config has the reviewers "pi"
+      And pi answers DANGEROUS "Empties /usr."
+      And "build-cache" is a symlink to "/usr"
+      When the agent asks to run "rm -rf build-cache/"
+      Then pi was told "build-cache/" leads to "/usr"
+
+    Scenario: Without the trailing slash, the symlink itself is named
+      Given the config has the reviewers "pi"
+      And pi answers SAFE "Removes only the link."
+      And "build-cache" is a symlink to "/usr"
+      When the agent asks to run "rm -rf build-cache"
+      Then pi was told "build-cache" leads to "/usr"
+
     Scenario: A script that runs is reviewed with its contents
       Given the config has the reviewers "pi"
       And pi answers DANGEROUS "The script resets every service."

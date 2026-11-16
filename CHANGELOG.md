@@ -2,7 +2,8 @@
 
 ## 0.6.0
 - Choose each reviewer's model and reasoning level: after an agent, setup lists the models and levels it offers (Claude Code, Codex, pi and omp; models only for opencode and Grok). Default leaves it to the agent.
-- `omasudo test [agent]`, also offered at the end of setup: 16 root requests with known answers go through the same review as the dialog, and each verdict scores good (expected), okay (more cautious) or fail (less cautious). Nothing is run. The counts are kept per agent, model and level, and the picker shows them.
+- `omasudo test [agent]`, also offered at the end of setup: 24 root requests with known answers (15 of them dangerous) go through the same review as the dialog, and each verdict scores good (expected), okay (more cautious) or fail (less cautious). Nothing is run. The answers per expected verdict follow, with how many dangerous requests were called DANGEROUS. The counts are kept per agent, model and level, and the picker shows them.
+- Evidence shows where a path in the command really leads when it goes through a symlink, relative paths taken from the requester's folder: `rm -rf build-cache/` on a link to `/usr` is no longer a cache cleanup to a reviewer that can't look.
 
 ## 0.5.0
 - Choose the reviewer: Claude Code, Codex, pi, omp, opencode or Grok, with fallbacks in order, or no AI review. Setup lists the agents it finds, marks the Omarchy default and which are signed in, and starts on the default. Running `omasudo` opens setup again, starting on the current reviewer; `omasudo agents` lists the agents. Existing installs are asked once.
