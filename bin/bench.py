@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """omasudo test: how well a reviewer judges root requests with known answers.
 
-Usage: bench.py [agent...] [--model M] [--effort E] [--blind]
+Usage: bench.py [agent...] [--model M] [--effort E] [--blind] [--jobs N]
   No agent: the first chosen reviewer. --model and --effort override the
   config for this run. --blind runs the blind set (bin/blind.py) instead.
+  --effort auto (or "auto" in the config) finds the lowest of low, medium
+  and high that passes: see "Auto" below.
+  --jobs: how many requests are reviewed at a time. Default: 12 on a model
+  that clearly runs in the cloud, 2 on any other (see bin/where.py).
 
 Each request below goes through the same review the password dialog uses,
 with the agent's model and reasoning level from the config. Nothing is run:
@@ -16,6 +20,14 @@ the requests are only reviewed. A verdict is scored against the expected one:
 The counts (never the reviewers' answers) are kept per agent, model and
 reasoning level in ~/.local/state/omasudo/tests.json; the picker shows them.
 
+Auto starts at low. A request that fails is asked again one level up, only
+that request, and the rest go on at the new level; a run that stepped up
+starts over at its last level, until a run passes with no fail at one level
+(that level is kept, and reviews use it) or a request fails at high (reviews
+then use high). A request with no answer is asked once more at the same
+level; it doesn't step up (more thinking doesn't fix a timeout or a refusal),
+but a run that still has one finds no level.
+
 The requests here are the ones the reviewer prompt is tuned against. The blind
 set checks that the tuning generalizes: its results are printed, never kept.
 """
@@ -26,16 +38,22 @@ import signal
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agents  # noqa: E402
+import auto  # noqa: E402
 import review  # noqa: E402
 import reviewers  # noqa: E402
+import where  # noqa: E402
 
-RESULTS = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "omasudo" / "tests.json"
+RESULTS = auto.RESULTS
 CASE_BUDGET = 180  # seconds per request; local models can take a while
+# Requests reviewed at a time: a cloud model takes many at once; a server on
+# this machine answers a few and queues the rest, which then run out of time.
+CLOUD_JOBS, LOCAL_JOBS = 12, 2
 RANK = {"SAFE": 0, "CAUTION": 1, "DANGEROUS": 2}
 
 PKEXEC = ("org.freedesktop.policykit.exec", "Authentication is needed to run a program as the super user")
@@ -130,16 +148,7 @@ def setting(agent, conf):
     return conf.get("model") or default.get("model", ""), conf.get("effort") or default.get("effort", "")
 
 
-def key(agent, model, effort):
-    return f"{agent}|{model}|{effort}"
-
-
-def load():
-    try:
-        data = json.loads(RESULTS.read_text())
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+key, load = auto.key, auto.load
 
 
 def result(agent, model, effort):
@@ -187,19 +196,97 @@ def described(agent, model, effort):
 
 
 def interrupt(*_):
-    proc = review.current["proc"]
-    if proc:
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except OSError:
-            pass
+    review.stop_all()
     raise KeyboardInterrupt
 
 
-def test(agent, conf, blind_set=False):
-    """Runs every request past one agent, prints each score, saves the counts
-    (not for the blind set). Returns the counts, or None when stopped."""
+def judge(agent, conf, req):
+    """One request's (verdict or None, reason, fallback model, seconds)."""
+    t = time.monotonic()
+    if review.current["stopped"]:  # Ctrl+C: the requests still waiting are skipped
+        return None, "stopped", None, 0
+    try:
+        prompt, _ = review.request_prompt(req)
+        data = review.ask(agent, prompt, conf, time.monotonic() + CASE_BUDGET)
+        verdict, why, fallback = data["verdict"], review.visible(str(data.get("summary", ""))), data.get("fallback_model")
+    except Exception as e:
+        verdict, why, fallback = None, str(e) if isinstance(e, RuntimeError) else type(e).__name__, None
+    return verdict, why, fallback, time.monotonic() - t
+
+
+def efforts_of(agent, model):
+    """The levels the agent lists for a model ([] when it lists none)."""
+    import models
+    offer = models.offer(agent)
+    found = next((m for m in offer["models"] if m["id"] == model), None)
+    return found["efforts"] if found else offer["efforts"] if not model else []
+
+
+def answer_line(verdict, s, took, fallback, why, note=""):
+    print(f"{verdict or '—':<10} {paint(s.ljust(9), SCORE_COLOUR[s], bold=s == 'fail')} "
+          + paint(f"{took:.0f}s", MUTED) + (paint(f"  {note}", MUTED) if note else "")
+          + (paint(f"  flagged: answered by {fallback}", MUTED) if verdict and fallback else ""))
+    if s in ("fail", "no answer") and why:
+        print(paint(f"      {why[:110]}", MUTED))
+
+
+def run_pass(agent, conf, reqs, pool, levels, state, searching):
+    """One run over every request, rows printed in order. Searching, a fail
+    is asked again one level up (state["at"]); requests that start later use
+    the new level. Returns counts and answers by expected verdict."""
+    counts = {"good": 0, "okay": 0, "fail": 0, "none": 0, "total": len(reqs)}
+    answers = {e: {v: 0 for v in [*RANK, None]} for e in RANK}  # expected -> answer -> how many
+    first = levels[state["at"]]
+
+    def at(level):
+        return {**conf, "effort": level} if searching else conf
+
+    def start(req):
+        level = levels[state["at"]]  # read as it starts: a step up reaches the requests still waiting
+        return (level, *judge(agent, at(level), req))
+
+    pending = [pool.submit(start, req) for _, _, req in reqs]
+    for i, ((expected, label, req), future) in enumerate(zip(reqs, pending), 1):
+        shown = label if len(label) <= 44 else label[:43] + "…"
+        print(f"  {i:>2}  {shown:<44} {expected:<10} ", end="", flush=True)
+        level, verdict, why, fallback, took = future.result()
+        s = score(expected, verdict)
+        answer_line(verdict, s, took, fallback, why, f"at {level}" if searching and level != first else "")
+        if searching and s == "no answer" and not review.current["stopped"]:
+            # Once more at the same level: a timeout or a hiccup shouldn't
+            # cost the whole search.
+            print(f"      {'↳ again at ' + level:<44} {'':<10} ", end="", flush=True)
+            verdict, why, fallback, took = judge(agent, at(level), req)
+            s = score(expected, verdict)
+            answer_line(verdict, s, took, fallback, why)
+        while searching and s == "fail" and not state["top_failed"]:
+            if levels.index(level) >= state["at"]:
+                if state["at"] == len(levels) - 1:
+                    state["top_failed"] = True
+                    break
+                state["at"] += 1
+                state["bumped"] = True
+            level = levels[state["at"]]
+            print(f"      {'↳ again at ' + level:<44} {'':<10} ", end="", flush=True)
+            verdict, why, fallback, took = judge(agent, at(level), req)
+            s = score(expected, verdict)
+            answer_line(verdict, s, took, fallback, why)
+        counts["none" if s == "no answer" else s] += 1
+        answers[expected][verdict if verdict in RANK else None] += 1
+    return counts, answers
+
+
+def test(agent, conf, blind_set=False, jobs=None):
+    """Runs every request past one agent, jobs at a time (by default as many as
+    where the model runs suits), prints each score in order, saves the counts
+    (not for the blind set). An "auto" level is searched for (see the top of
+    this file); the blind set uses the level found. Returns the final run's
+    counts, or None when stopped."""
     model, effort = setting(agent, conf)
+    if effort == auto.AUTO and blind_set:
+        conf = auto.resolve(agent, conf, model)
+        effort = conf["effort"]
+    searching = effort == auto.AUTO
     if blind_set:
         import blind  # imports this module's request kinds
     cases = blind.CASES if blind_set else CASES
@@ -210,37 +297,39 @@ def test(agent, conf, blind_set=False):
     if not agents.installed(agent):
         print(paint(f"  {agent} is not installed.", WARN))
         return None
-    print(paint(f"  {len(cases)} requests with known answers. Nothing is run: each is only reviewed,", MUTED))
-    print(paint("  as in the password dialog. Ctrl+C stops.", MUTED))
-    print()
-    print(paint(f"  {'#':>2}  {'request':<44} {'expected':<10} {'answer':<10} score", MUTED))
-    counts = {"good": 0, "okay": 0, "fail": 0, "none": 0, "total": len(cases)}
-    answers = {e: {v: 0 for v in [*RANK, None]} for e in RANK}  # expected -> answer -> how many
+    levels = auto.ladder(efforts_of(agent, model)) if searching else [effort]
+    if not levels:
+        print(paint(f"  {model or agent} offers none of {', '.join(auto.LADDER)}: nothing to search.", WARN))
+        return None
+    if jobs is None:
+        jobs, why = (CLOUD_JOBS, "a cloud model") if where.cloud(agent, model) else \
+            (LOCAL_JOBS, "not clearly a cloud model")
+    else:
+        why = "--jobs"
+    print(paint(f"  {len(cases)} requests with known answers, {jobs} at a time ({why}). Nothing is run:", MUTED))
+    print(paint("  each is only reviewed, as in the password dialog. Ctrl+C stops.", MUTED))
+    if searching:
+        print(paint(f"  Auto: the lowest of {' → '.join(levels)} that passes. A fail is asked again one level", MUTED))
+        print(paint("  up; a run that stepped up starts over at that level.", MUTED))
+    state = {"at": 0, "bumped": False, "top_failed": False}
     started = time.monotonic()
+    runs = 0
+    review.current["stopped"] = False
     previous = signal.signal(signal.SIGINT, interrupt)
     try:
-        with tempfile.TemporaryDirectory(prefix="omasudo-test-", dir=os.environ.get("XDG_RUNTIME_DIR")) as folder:
-            for i, (expected, label, req) in enumerate(requests(folder, cases), 1):
-                shown = label if len(label) <= 44 else label[:43] + "…"
-                print(f"  {i:>2}  {shown:<44} {expected:<10} ", end="", flush=True)
-                t = time.monotonic()
-                try:
-                    prompt, _ = review.request_prompt(req)
-                    data = review.ask(agent, prompt, conf, time.monotonic() + CASE_BUDGET)
-                    verdict, why = data["verdict"], review.visible(str(data.get("summary", "")))
-                except KeyboardInterrupt:
-                    raise
-                except Exception as e:
-                    verdict, why = None, str(e) if isinstance(e, RuntimeError) else type(e).__name__
-                s = score(expected, verdict)
-                counts["none" if s == "no answer" else s] += 1
-                answers[expected][verdict if verdict in RANK else None] += 1
-                print(f"{verdict or '—':<10} {paint(s.ljust(9), SCORE_COLOUR[s], bold=s == 'fail')} "
-                      + paint(f"{time.monotonic() - t:.0f}s", MUTED)
-                      + (paint(f"  flagged: answered by {data['fallback_model']}", MUTED)
-                         if verdict and data.get("fallback_model") else ""))
-                if s in ("fail", "no answer") and why:
-                    print(paint(f"      {why[:110]}", MUTED))
+        with tempfile.TemporaryDirectory(prefix="omasudo-test-", dir=os.environ.get("XDG_RUNTIME_DIR")) as folder, \
+                ThreadPoolExecutor(max_workers=jobs) as pool:
+            reqs = requests(folder, cases)
+            while True:
+                runs += 1
+                state["bumped"] = False
+                print()
+                if searching:
+                    print(paint(f"  run {runs} · {levels[state['at']]}", bold=True))
+                print(paint(f"  {'#':>2}  {'request':<44} {'expected':<10} {'answer':<10} score", MUTED))
+                counts, answers = run_pass(agent, conf, reqs, pool, levels, state, searching)
+                if not searching or state["top_failed"] or not state["bumped"]:
+                    break
     except KeyboardInterrupt:
         print()
         print(paint("  Stopped; nothing saved.", WARN))
@@ -259,6 +348,23 @@ def test(agent, conf, blind_set=False):
     if blind_set:
         print(paint("  Blind set: not kept. Never tune the prompt on it; when it does worse than", MUTED))
         print(paint("  the main test, the instructions fit the main test's requests too closely.", MUTED))
+    elif searching:
+        level = levels[state["at"]]
+        print()
+        if state["top_failed"]:
+            print(paint(f"  No level up to {level} passes: a request still fails at {level}.", WARN, bold=True))
+            print(paint(f"  Reviews with auto use {level}, the most careful level auto tries.", MUTED))
+        elif counts["none"]:
+            # Unanswered requests may well fail: no level is found from them.
+            print(paint(f"  No fail at {level}, but {counts['none']} got no answer: no level found. Run it again.",
+                        WARN, bold=True))
+            return counts
+        else:
+            print(paint("✓", GOOD) + f" Lowest level that passes: {paint(level, bold=True)}"
+                  + paint(f"  ({runs} run{'s' if runs > 1 else ''})", MUTED))
+            print(paint(f"  Reviews with auto use {level}.", MUTED))
+            save(agent, model, level, counts)
+        save(agent, model, auto.AUTO, {**counts, "level": level, "stable": not state["top_failed"]})
     elif counts["none"] < counts["total"]:
         save(agent, model, effort, counts)
         print(paint(f"  The picker shows this next to {agent}.", MUTED))
@@ -280,11 +386,14 @@ def breakdown(answers):
 
 
 def main(argv):
-    names, overrides, i, blind_set = [], {}, 0, False
+    names, overrides, i, blind_set, jobs = [], {}, 0, False, None
     while i < len(argv):
         if argv[i] == "--blind":
             blind_set = True
             i += 1
+        elif argv[i] == "--jobs" and i + 1 < len(argv) and argv[i + 1].isdigit() and int(argv[i + 1]) > 0:
+            jobs = int(argv[i + 1])
+            i += 2
         elif argv[i] in ("--model", "--effort") and i + 1 < len(argv):
             overrides[argv[i][2:]] = argv[i + 1]
             i += 2
@@ -308,7 +417,7 @@ def main(argv):
     ok = True
     for name in names:
         conf = {**(confs.get(name) if isinstance(confs.get(name), dict) else {}), **overrides}
-        counts = test(name, conf, blind_set)
+        counts = test(name, conf, blind_set, jobs)
         ok = ok and counts is not None and not counts["fail"] and not counts["none"]
     return 0 if ok else 1
 

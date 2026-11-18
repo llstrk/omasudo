@@ -10,7 +10,10 @@
 #   omasudo agents        coding agents found on this machine
 #   omasudo test [agent]  score a reviewer on requests with known answers
 #                         (the first reviewer if none is named); --blind runs
-#                         the held-out set that checks the prompt generalizes
+#                         the held-out set that checks the prompt generalizes;
+#                         --jobs N reviews N requests at a time (default 12
+#                         on a cloud model, 2 on any other); --effort auto
+#                         finds the lowest of low, medium, high that passes
 #   omasudo uninstall     remove the polkit rule
 #   omasudo update [--check|--off|--on]  new versions (see bin/update.py)
 set -uo pipefail

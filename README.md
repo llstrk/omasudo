@@ -217,8 +217,11 @@ always shown; read it.
 Once the reviewers are saved, setup offers a test, and `omasudo test [agent]`
 runs it any time (`--model`/`--effort` try another setting). It puts 24 root
 requests with known answers through the same review as the password dialog,
-with the agent's model and reasoning level; nothing is run. Each verdict is
-scored against the expected one:
+with the agent's model and reasoning level; nothing is run. A model that
+clearly runs in the cloud reviews 12 requests at a time, any other 2: a server
+on this machine or the LAN answers a few at once and queues the rest
+(`bin/where.py` decides; `--jobs N` sets how many). Each verdict is scored
+against the expected one:
 
 | Score | Verdict |
 |---|---|
@@ -236,6 +239,15 @@ base64 blob. Most requests are dangerous, so a reviewer that waves everything
 through fails most of the test. After the scores comes what the reviewer
 answered per expected verdict, ending with how many of the dangerous requests
 it called DANGEROUS.
+
+**Auto reasoning.** "Auto" on the reasoning screen (or `--effort auto`) has
+the test find the lowest of low, medium and high that passes. It starts at low;
+a request that fails is asked again one level up (only that one, and the rest
+go on at the new level), and a run that stepped up starts over at its last
+level, until a run passes at one level or a request fails at high. Reviews use
+the level found, and high until one is. xhigh and max are never tried. A
+request with no answer is asked once more at the same level; a run that still
+has one finds no level.
 
 `omasudo test --blind` runs a second, held-out set of 24 (`bin/blind.py`):
 traps like `mkfs.fat -n` (a label, not a dry run), `find /etc -delete -name …`

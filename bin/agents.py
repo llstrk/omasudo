@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import auto  # noqa: E402
 import reviewers  # noqa: E402
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omasudo" / "config.json"
@@ -219,10 +220,12 @@ def option(a, width):
 
 
 def tested(result, level=None):
-    """'  tested 13/16 good' for a picker row; nothing when never tested."""
+    """'  tested 13/16 good' for a picker row; nothing when never tested. An
+    auto result names the level it found."""
     import bench
     if not result:
         return ""
+    level = level or result.get("level")
     text = bench.summary(result) + (f" at {level}" if level else "")
     return "  " + paint(text, WARN if result.get("fail") or result.get("none") else MUTED)
 
@@ -270,9 +273,15 @@ def choose_setting(name, chosen):
         rows = [(paint("Default", bold=True) + "  " + paint(own_level or f"{name}'s own default", MUTED)
                  + tested(bench.result(name, model_key, own.get("effort", ""))), DEFAULT)]
         rows += [(level + tested(bench.result(name, model_key, level)), level) for level in efforts]
+        ladder = auto.ladder(efforts)
+        if ladder:
+            # Auto finds its level when tested; until then reviews use the top one.
+            rows.append((paint("Auto", bold=True) + "  " + paint(f"the lowest of {' · '.join(ladder)} that passes the test", MUTED)
+                         + (tested(bench.result(name, model_key, auto.AUTO)) or paint(f"  not tested: {ladder[-1]} until then", MUTED)),
+                         auto.AUTO))
         screen(*progress, f"How long {name} thinks before answering. More is slower, and usually",
                "more careful; omasudo test shows how a level does.", "")
-        start = next((l for l, v in rows if v == (effort if effort in efforts else DEFAULT)), None)
+        start = next((l for l, v in rows if v == (effort if effort in efforts or effort == auto.AUTO else DEFAULT)), None)
         level = gum_choose(f"Reasoning for {name} · {model or 'default model'}", rows, start)
         if level is not None:
             effort = "" if level == DEFAULT else level
@@ -293,7 +302,8 @@ def offer_test(chosen):
     """After the choice: test the first reviewer, or all, against requests
     with known answers (bin/bench.py)."""
     import bench
-    rows = [(f"Test {chosen[0]}" + paint(f"  {len(bench.CASES)} requests · a few minutes (longer on a local model)", MUTED),
+    finds = " · finds the level (auto)" if settings(chosen[0]).get("effort") == auto.AUTO else ""
+    rows = [(f"Test {chosen[0]}" + paint(f"  {len(bench.CASES)} requests · a few minutes (longer on a local model){finds}", MUTED),
              "first")]
     if len(chosen) > 1:
         rows.append((f"Test all  " + order(chosen), "all"))
