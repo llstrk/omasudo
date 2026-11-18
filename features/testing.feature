@@ -108,10 +108,11 @@ Feature: Testing a reviewer on requests with known answers
       Then it prints "testing pi"
       And claude was not asked
 
-  Rule: A cloud model takes 12 requests at a time, any other 2
+  Rule: A cloud model takes 12 requests at a time; for any other the user says how many
     A server on this machine answers a few requests at once and queues the
     rest, which then run out of time. Only a model that clearly runs in the
-    cloud gets 12.
+    cloud gets 12; for any other the test asks, starting on the last answer
+    or 2, and takes 2 when there is no answer.
 
     Scenario: Claude is a cloud model: 12 at a time, the rows in order
       Given claude answers CAUTION "Changes the system."
@@ -121,14 +122,48 @@ Feature: Testing a reviewer on requests with known answers
       And claude reviewed 12 requests at a time
       And the test's rows are in order
 
-    Scenario: A provider on this machine gets 2 at a time
+    Scenario: On a provider on this machine, the user says how many
+      Given pi's own config has the provider "tensorfold" at "http://127.0.0.1:8080/v1"
+      And the config sets pi's model to "tensorfold/qwen3.8-flash-next" and effort to "low"
+      And pi answers DANGEROUS "Could break the system."
+      And pi takes 0.3 seconds to answer
+      When I run "omasudo test pi" and choose:
+        | 3 |
+      Then the first question is "How many requests at once?" and offers:
+        | 1 |
+        | 2 |
+        | 3 |
+        | 4 |
+        | 6 |
+        | 8 |
+      And the first question starts on "2"
+      And it prints "3 at a time (your choice; not clearly a cloud model)"
+      And pi reviewed 3 requests at a time
+
+    Scenario: The answer is kept, and the next test starts on it
+      Given pi's own config has the provider "tensorfold" at "http://127.0.0.1:8080/v1"
+      And the config sets pi's model to "tensorfold/qwen3.8-flash-next" and effort to "low"
+      And pi answers DANGEROUS "Could break the system."
+      When I run "omasudo test pi" and choose:
+        | 4 |
+      And I run "omasudo test pi" and press Esc
+      Then the second question starts on "4"
+      And it prints "4 at a time (your last choice; not clearly a cloud model)"
+
+    Scenario: No answer is 2 at a time
       Given pi's own config has the provider "tensorfold" at "http://127.0.0.1:8080/v1"
       And the config sets pi's model to "tensorfold/qwen3.8-flash-next" and effort to "low"
       And pi answers CAUTION "Changes the system."
       And pi takes 0.2 seconds to answer
-      When I run "omasudo test pi"
+      When I run "omasudo test pi" and press Esc
       Then it prints "2 at a time (not clearly a cloud model)"
       And pi reviewed 2 requests at a time
+
+    Scenario: A cloud model is not asked
+      Given claude answers CAUTION "Changes the system."
+      When I run "omasudo test claude"
+      Then it does not print "How many requests at once?"
+      And no question was asked
 
     Scenario: A provider on the LAN gets 2 at a time
       Given pi's own config has the provider "gpubox" at "http://192.168.1.20:8000/v1"

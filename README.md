@@ -218,9 +218,10 @@ Once the reviewers are saved, setup offers a test, and `omasudo test [agent]`
 runs it any time (`--model`/`--effort` try another setting). It puts 24 root
 requests with known answers through the same review as the password dialog,
 with the agent's model and reasoning level; nothing is run. A model that
-clearly runs in the cloud reviews 12 requests at a time, any other 2: a server
-on this machine or the LAN answers a few at once and queues the rest
-(`bin/where.py` decides; `--jobs N` sets how many). Each verdict is scored
+clearly runs in the cloud reviews 12 requests at a time (`bin/where.py`
+decides). For any other the test asks how many: a server on this machine or the
+LAN answers a few at once and queues the rest, so match its parallel setting.
+The answer is kept for the next test; `--jobs N` skips the question. Each verdict is scored
 against the expected one:
 
 | Score | Verdict |

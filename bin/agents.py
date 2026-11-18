@@ -138,6 +138,18 @@ def settings(name):
     return conf if isinstance(conf, dict) else {}
 
 
+def save_jobs(name, jobs):
+    """How many requests omasudo test sends this agent at once, when its
+    model isn't clearly a cloud one (bin/bench.py asks)."""
+    data = load()
+    confs = data.get("agents") if isinstance(data.get("agents"), dict) else {}
+    conf = dict(confs.get(name)) if isinstance(confs.get(name), dict) else {}
+    conf["jobs"] = jobs
+    confs[name] = conf
+    data["agents"] = confs
+    write(data)
+
+
 def save_setting(name, model, effort):
     """Sets an agent's model and level; "" removes it (the default). Other
     keys the user put there are kept."""

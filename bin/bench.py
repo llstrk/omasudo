@@ -7,7 +7,8 @@ Usage: bench.py [agent...] [--model M] [--effort E] [--blind] [--jobs N]
   --effort auto (or "auto" in the config) finds the lowest of low, medium
   and high that passes: see "Auto" below.
   --jobs: how many requests are reviewed at a time. Default: 12 on a model
-  that clearly runs in the cloud, 2 on any other (see bin/where.py).
+  that clearly runs in the cloud (see bin/where.py); on any other the test
+  asks, starting on the last answer (kept in the config), or 2.
 
 Each request below goes through the same review the password dialog uses,
 with the agent's model and reasoning level from the config. Nothing is run:
@@ -54,6 +55,7 @@ CASE_BUDGET = 180  # seconds per request; local models can take a while
 # Requests reviewed at a time: a cloud model takes many at once; a server on
 # this machine answers a few and queues the rest, which then run out of time.
 CLOUD_JOBS, LOCAL_JOBS = 12, 2
+JOB_CHOICES = (1, 2, 3, 4, 6, 8)
 RANK = {"SAFE": 0, "CAUTION": 1, "DANGEROUS": 2}
 
 PKEXEC = ("org.freedesktop.policykit.exec", "Authentication is needed to run a program as the super user")
@@ -222,6 +224,25 @@ def efforts_of(agent, model):
     return found["efforts"] if found else offer["efforts"] if not model else []
 
 
+def ask_jobs(agent, model, conf):
+    """How many at once on a model that isn't clearly a cloud one: the user's
+    answer (kept), else the last one, else 2. (jobs, why)"""
+    last = conf.get("jobs") if isinstance(conf.get("jobs"), int) and conf.get("jobs") > 0 else None
+    print(paint(f"  {model or agent} isn't clearly a cloud model. A server on this machine or the LAN", MUTED))
+    print(paint("  answers a few requests at once and queues the rest, which then run out of time:", MUTED))
+    print(paint("  match its parallel setting (--parallel in TensorFold and llama.cpp).", MUTED))
+    print()
+    choices = sorted({*JOB_CHOICES, *([last] if last else [])})
+    picked = agents.gum_choose("How many requests at once?", [(str(n), str(n)) for n in choices],
+                               str(last or LOCAL_JOBS))
+    print()
+    if picked and picked.isdigit() and int(picked) > 0:
+        if int(picked) != last:
+            agents.save_jobs(agent, int(picked))
+        return int(picked), "your choice; not clearly a cloud model"
+    return (last, "your last choice; not clearly a cloud model") if last else (LOCAL_JOBS, "not clearly a cloud model")
+
+
 def answer_line(verdict, s, took, fallback, why, note=""):
     print(f"{verdict or '—':<10} {paint(s.ljust(9), SCORE_COLOUR[s], bold=s == 'fail')} "
           + paint(f"{took:.0f}s", MUTED) + (paint(f"  {note}", MUTED) if note else "")
@@ -302,8 +323,7 @@ def test(agent, conf, blind_set=False, jobs=None):
         print(paint(f"  {model or agent} offers none of {', '.join(auto.LADDER)}: nothing to search.", WARN))
         return None
     if jobs is None:
-        jobs, why = (CLOUD_JOBS, "a cloud model") if where.cloud(agent, model) else \
-            (LOCAL_JOBS, "not clearly a cloud model")
+        jobs, why = (CLOUD_JOBS, "a cloud model") if where.cloud(agent, model) else ask_jobs(agent, model, conf)
     else:
         why = "--jobs"
     print(paint(f"  {len(cases)} requests with known answers, {jobs} at a time ({why}). Nothing is run:", MUTED))

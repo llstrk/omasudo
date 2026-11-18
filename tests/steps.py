@@ -481,6 +481,11 @@ def nth_header(ctx, nth, header):
     assert questions(ctx)[NTH.index(nth)]["header"] == header, [q["header"] for q in questions(ctx)]
 
 
+@step("no question was asked")
+def no_question(ctx):
+    assert not questions(ctx), questions(ctx)
+
+
 @step("the {nth} question starts on {label}")
 def nth_starts(ctx, nth, label):
     assert questions(ctx)[NTH.index(nth)]["selected"] == label, questions(ctx)[NTH.index(nth)]
