@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 
+import auto
 import jail
 
 SUPPORTED = ["claude", "codex", "pi", "omp", "opencode", "grok"]
@@ -294,7 +295,9 @@ BUILD = {"claude": claude, "codex": codex, "pi": pi, "omp": omp, "opencode": ope
 
 
 def build(name, prompt, workdir, conf):
-    """argv, stdin text, parse(stdout) -> dict, extra environment."""
+    """argv, stdin text, parse(stdout) -> dict, extra environment. An "auto"
+    level is the one omasudo test found for the model (bin/auto.py)."""
+    conf = auto.resolve(name, conf or {}, DEFAULTS.get(name, {}).get("model", ""))
     if name in READ_ONLY:
         tools = jail.available()
         argv, stdin, parse, *env = BUILD[name](prompt, workdir, conf or {}, tools)

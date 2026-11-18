@@ -124,10 +124,11 @@ Feature: Choosing who reviews agent requests
         | opus         |
         | sonnet       |
       And the third question is "Reasoning for claude · sonnet" and offers:
-        | Default low |
-        | low         |
-        | high        |
-        | max         |
+        | Default low                                                                    |
+        | low                                                                            |
+        | high                                                                           |
+        | max                                                                            |
+        | Auto the lowest of low · high that passes the test not tested: high until then |
       And the config sets claude's model to "sonnet" and effort to "high"
       And it prints "claude sonnet, high"
 
@@ -177,9 +178,10 @@ Feature: Choosing who reviews agent requests
         | Default codex's own default |
         | GPT A gpt-a                 |
       And the third question is "Reasoning for codex · gpt-a" and offers:
-        | Default medium |
-        | low            |
-        | medium         |
+        | Default medium                                                                     |
+        | low                                                                                |
+        | medium                                                                             |
+        | Auto the lowest of low · medium that passes the test not tested: medium until then |
       And the config sets codex's model to "gpt-a" and effort to "low"
 
     Scenario: A pi model that doesn't think has no reasoning screen

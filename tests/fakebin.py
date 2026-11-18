@@ -16,6 +16,13 @@ or the desktop. What the scenario steers lives in $FAKE_DIR:
                        verdict for the first part the requested command
                        contains; others get <agent>.answer
   <agent>.fails        that agent exits 1
+  <agent>.verdicts-<level>  the same, for reviews at that reasoning level
+                       (--effort, --thinking or --reasoning-effort); it
+                       comes before <agent>.verdicts
+  <agent>.fails-once   a part of a command: the first review of a request
+                       containing it exits 1, later ones answer
+  <agent>.delay        seconds that agent takes to answer; each review's
+                       start and end times then go to <agent>.times
   <agent>.flags        models (one per line, as given to --model, "" for none)
                        on which that agent's safeguards refuse every review
   "<agent> <args>"     what that call prints, for the calls that list models
@@ -28,6 +35,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 tool = Path(sys.argv[0]).name
@@ -146,7 +154,17 @@ if tool in AGENTS:
         overlay=Path(overlay).read_text() if overlay else None,
         env={k: v for k, v in os.environ.items()
              if k.startswith("OPENCODE_") or k in ("GROK_HOME", "PI_CODING_AGENT_DIR", "HOME")})
+    delay = fake_dir / f"{tool}.delay"
+    if delay.exists():
+        start = time.time()
+        time.sleep(float(delay.read_text()))
+        with open(fake_dir / f"{tool}.times", "a") as f:
+            f.write(f"{start} {time.time()}\n")
     if (fake_dir / f"{tool}.fails").exists():
+        sys.exit(1)
+    once = fake_dir / f"{tool}.fails-once"
+    if once.exists() and once.read_text().strip() in prompt and not (fake_dir / f"{tool}.failed-once").exists():
+        (fake_dir / f"{tool}.failed-once").touch()
         sys.exit(1)
     flags = fake_dir / f"{tool}.flags"
     if flags.exists() and (option("--model") or "") in flags.read_text().splitlines():
@@ -155,13 +173,16 @@ if tool in AGENTS:
         sys.exit(1)
     answer_file = fake_dir / f"{tool}.answer"
     answer = answer_file.read_text() if answer_file.exists() else ""
-    verdicts = fake_dir / f"{tool}.verdicts"
-    if verdicts.exists():
+    level = option("--effort") or option("--thinking") or option("--reasoning-effort")
+    for verdicts in (fake_dir / f"{tool}.verdicts-{level}", fake_dir / f"{tool}.verdicts"):
+        if not verdicts.exists():
+            continue
         m = re.search(r'"requesting_command": ("(?:[^"\\]|\\.)*")', prompt)
         command = json.loads(m.group(1)) if m else ""
         hit = next((v for part, v in json.loads(verdicts.read_text()).items() if part in command), None)
         if hit:
             answer = json.dumps({"verdict": hit, "summary": f"{hit} by the fake", "details": ""})
+            break
     if tool == "claude":
         try:
             print(json.dumps({"structured_output": json.loads(answer)}))

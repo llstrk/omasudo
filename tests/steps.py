@@ -481,6 +481,11 @@ def nth_header(ctx, nth, header):
     assert questions(ctx)[NTH.index(nth)]["header"] == header, [q["header"] for q in questions(ctx)]
 
 
+@step("no question was asked")
+def no_question(ctx):
+    assert not questions(ctx), questions(ctx)
+
+
 @step("the {nth} question starts on {label}")
 def nth_starts(ctx, nth, label):
     assert questions(ctx)[NTH.index(nth)]["selected"] == label, questions(ctx)[NTH.index(nth)]
@@ -501,6 +506,11 @@ def picker_hides(ctx, text):
 @step("it prints {text}")
 def prints(ctx, text):
     assert text in ctx.output(), ctx.output()
+
+
+@step("it does not print {text}")
+def not_prints(ctx, text):
+    assert text not in ctx.output(), ctx.output()
 
 
 @step("it ends without an error")
@@ -549,6 +559,11 @@ def answers_verdict(ctx, agent, verdict, summary):
 @step("{agent} answers {text}")
 def answers_text(ctx, agent, text):
     (ctx.fake_dir / f"{agent}.answer").write_text(text)
+
+
+@step("{agent} fails once on {part}")
+def fails_once(ctx, agent, part):
+    (ctx.fake_dir / f"{agent}.fails-once").write_text(part)
 
 
 @step("{agent} fails")
@@ -943,6 +958,24 @@ def own_processes(ctx):
 
 # ------------------------------------------------------------------ omasudo test
 
+@step("{agent} at {level} judges these requests:")
+def judges_at(ctx, agent, level):
+    verdicts = {row[0]: row[1] for row in ctx.step.table}
+    (ctx.fake_dir / f"{agent}.verdicts-{level}").write_text(json.dumps(verdicts))
+
+
+@step("{agent} was asked {n} times")
+def asked_times(ctx, agent, n):
+    assert len(ctx.reviews_by(agent)) == int(n), len(ctx.reviews_by(agent))
+
+
+@step("{agent}'s last review was run with:")
+def last_run_with(ctx, agent):
+    argv = ctx.agent_call(agent)["args"]
+    for cell in table_column(ctx):
+        assert contains_run(argv, shlex.split(cell)), f"{cell} not in {argv}"
+
+
 @step("{agent} judges these requests:")
 def judges(ctx, agent):
     verdicts = {row[0]: row[1] for row in ctx.step.table}
@@ -953,13 +986,41 @@ def scored_rows(ctx):
     """The test's table: request -> "ANSWER score" (the row's last cells)."""
     rows = {}
     for line in ctx.output().splitlines():
-        m = re.match(r"(\d+) (.+?) (SAFE|CAUTION|DANGEROUS) (SAFE|CAUTION|DANGEROUS|—) (good|okay|fail|no answer) \d+s$", line)
+        m = re.match(r"(\d+) (.+?) (SAFE|CAUTION|DANGEROUS) (SAFE|CAUTION|DANGEROUS|—) (good|okay|fail|no answer) \d+s( .*)?$", line)
         if m:
             rows[m.group(2)] = (m.group(4), m.group(5))
     return rows
 
 
 TEST_REQUESTS = 24
+
+
+@step("pi's own config has the provider {provider} at {url}")
+def pi_provider(ctx, provider, url):
+    folder = ctx.home / ".pi" / "agent"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "models.json").write_text(json.dumps({"providers": {provider: {"baseUrl": url, "models": []}}}))
+
+
+@step("{agent} takes {seconds} seconds to answer")
+def takes_seconds(ctx, agent, seconds):
+    (ctx.fake_dir / f"{agent}.delay").write_text(seconds)
+
+
+@step("{agent} reviewed {n} requests at a time")
+def at_a_time(ctx, agent, n):
+    """The most reviews that ran at once, from the fake's start and end times."""
+    spans = [tuple(map(float, l.split())) for l in (ctx.fake_dir / f"{agent}.times").read_text().splitlines()]
+    assert len(spans) == TEST_REQUESTS, len(spans)
+    most = max(sum(1 for s, e in spans if s <= start < e) for start, _ in spans)
+    assert most == int(n), (most, spans)
+
+
+@step("the test's rows are in order")
+def rows_in_order(ctx):
+    numbers = [int(m.group(1)) for l in ctx.output().splitlines()
+               if (m := re.match(r"(\d+) .+ (?:SAFE|CAUTION|DANGEROUS) (?:SAFE|CAUTION|DANGEROUS|—) ", l))]
+    assert numbers == list(range(1, TEST_REQUESTS + 1)), numbers
 
 
 @step("the answers by expected verdict are:")

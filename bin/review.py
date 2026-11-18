@@ -102,16 +102,22 @@ def emit(verdict, summary, details="", command="", reviewer=""):
                       "command": command[:200], "reviewer": reviewer}))
 
 
-current = {"proc": None}
+# The reviewer processes running now: omasudo test runs several at once.
+# "stopped" keeps new ones from starting once Ctrl+C has stopped the rest.
+current = {"procs": set(), "stopped": False}
 
 
-def stop(*_):
-    proc = current["proc"]
-    if proc:
+def stop_all():
+    current["stopped"] = True
+    for proc in list(current["procs"]):
         try:
             os.killpg(proc.pid, signal.SIGTERM)
         except OSError:
             pass
+
+
+def stop(*_):
+    stop_all()
     sys.exit(1)
 
 
@@ -142,6 +148,8 @@ def ask_once(name, prompt, conf, deadline):
         raise RuntimeError("not installed")
     with tempfile.TemporaryDirectory(prefix="omasudo-", dir=os.environ.get("XDG_RUNTIME_DIR")) as cwd:
         argv, stdin, parse, env = reviewers.build(name, prompt, cwd, conf)
+        if current["stopped"]:
+            raise RuntimeError("stopped")
         try:
             proc = subprocess.Popen(argv, cwd=cwd, env={**os.environ, **env},
                                     stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
@@ -150,7 +158,9 @@ def ask_once(name, prompt, conf, deadline):
                                     preexec_fn=die_with_parent)
         except OSError:
             raise RuntimeError("could not start")
-        current["proc"] = proc
+        current["procs"].add(proc)
+        if current["stopped"]:  # stopped while it started
+            stop_all()
         try:
             out, _ = proc.communicate(stdin, timeout=max(5, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
@@ -161,7 +171,7 @@ def ask_once(name, prompt, conf, deadline):
             proc.wait()
             raise RuntimeError("timed out")
         finally:
-            current["proc"] = None
+            current["procs"].discard(proc)
         if reviewers.refused(name, out):
             raise Refused()
         if proc.returncode != 0:

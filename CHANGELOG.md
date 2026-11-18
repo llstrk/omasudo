@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0
+- `omasudo test` reviews several requests at a time; the rows still print in order. A model that clearly runs in the cloud gets 12 at a time. For any other the test asks how many, since a server on this machine or the LAN answers a few at once and queues the rest, which then run out of time; the answer is kept per reviewer, and no answer is 2. Cloud is Claude, Grok and Codex unless they are pointed at a local server, and for pi, omp and opencode a provider at a public address or a built-in one that isn't a local server (ollama, LM Studio, ...). `--jobs N` sets how many. Ctrl+C stops the reviews running and skips the rest.
+- Auto reasoning: pick "Auto" on the reasoning screen (or `omasudo test --effort auto`) and the test finds the lowest of low, medium and high that passes. It starts at low; a request that fails is asked again one level up, only that request, and the rest go on at the new level. A run that stepped up starts over at its last level, until a run passes at one level (kept, and reviews use it) or a request fails at high. Never xhigh or max. Until a level is found, reviews use high. A request with no answer is asked once more at the same level; it doesn't step up, and a run that still has one finds no level.
+
 ## 0.6.0
 - Choose each reviewer's model and reasoning level: after an agent, setup lists the models and levels it offers (Claude Code, Codex, pi and omp; models only for opencode and Grok). Default leaves it to the agent.
 - `omasudo test [agent]`, also offered at the end of setup: 24 root requests with known answers (15 of them dangerous) go through the same review as the dialog, and each verdict scores good (expected), okay (more cautious) or fail (less cautious). Nothing is run. The answers per expected verdict follow, with how many dangerous requests were called DANGEROUS. The counts are kept per agent, model and level, and the picker shows them.
