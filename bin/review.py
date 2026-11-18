@@ -116,7 +116,28 @@ def stop(*_):
 
 
 def ask(name, prompt, conf, deadline):
-    """One reviewer's answer, or raise with a short reason (no request text)."""
+    """One reviewer's answer, or raise with a short reason (no request text).
+    When the agent's safeguards refuse the review, it is asked again on the
+    model the agent itself switches to; the answer then says which in
+    "fallback_model"."""
+    try:
+        return ask_once(name, prompt, conf, deadline)
+    except Refused:
+        model = reviewers.refusal_fallback(name, conf)
+        if not model or time.monotonic() > deadline - 5:
+            raise RuntimeError("safeguards declined to review")
+        try:
+            data = ask_once(name, prompt, {**conf, "model": model}, deadline)
+        except Refused:
+            raise RuntimeError(f"safeguards declined to review, also on {model}")
+        return {**data, "fallback_model": model}
+
+
+class Refused(RuntimeError):
+    pass
+
+
+def ask_once(name, prompt, conf, deadline):
     if not agents.installed(name):
         raise RuntimeError("not installed")
     with tempfile.TemporaryDirectory(prefix="omasudo-", dir=os.environ.get("XDG_RUNTIME_DIR")) as cwd:
@@ -141,6 +162,8 @@ def ask(name, prompt, conf, deadline):
             raise RuntimeError("timed out")
         finally:
             current["proc"] = None
+        if reviewers.refused(name, out):
+            raise Refused()
         if proc.returncode != 0:
             raise RuntimeError(f"exit {proc.returncode}")
         try:
@@ -150,6 +173,32 @@ def ask(name, prompt, conf, deadline):
     if not isinstance(data, dict) or data.get("verdict") not in ("SAFE", "CAUTION", "DANGEROUS"):
         raise RuntimeError("no verdict")
     return data
+
+
+def request_prompt(req):
+    """The reviewer's prompt for a request, with evidence, and the redacted
+    command."""
+    command = redact(req.get("command", ""))
+    body = {
+        "polkit_action": req.get("actionId", ""),
+        "polkit_message": req.get("message", ""),
+        "requesting_command": command,
+        "process_chain": req.get("chain", []),
+    }
+    if req.get("parentCommand"):
+        body["enclosing_shell_command"] = redact(req["parentCommand"])
+    files = req.get("files")
+    scripts = []
+    if isinstance(files, list) and files:
+        body["files_named_in_command"] = named_files([str(f) for f in files])
+        scripts = [f["content"] for f in body["files_named_in_command"] if f.get("content")]
+    try:
+        body["evidence"] = evidence.gather(command, scripts, req.get("cwd") or None)
+    except Exception:  # evidence is a help, never a reason to give no verdict
+        body["evidence"] = {"error": "could not gather evidence"}
+    # json.dumps already escapes non-ASCII (so bidi tricks arrive as \uXXXX);
+    # also escape "@" so nothing in the request can act as an @file mention.
+    return "<request>\n" + json.dumps(body, indent=2).replace("@", "\\u0040") + "\n</request>", command
 
 
 def main():
@@ -172,27 +221,7 @@ def main():
     # The budget covers evidence too: the dialog counts on a verdict, or why
     # there is none, within it.
     deadline = time.monotonic() + BUDGET
-    command = redact(req.get("command", ""))
-    body = {
-        "polkit_action": req.get("actionId", ""),
-        "polkit_message": req.get("message", ""),
-        "requesting_command": command,
-        "process_chain": req.get("chain", []),
-    }
-    if req.get("parentCommand"):
-        body["enclosing_shell_command"] = redact(req["parentCommand"])
-    files = req.get("files")
-    scripts = []
-    if isinstance(files, list) and files:
-        body["files_named_in_command"] = named_files([str(f) for f in files])
-        scripts = [f["content"] for f in body["files_named_in_command"] if f.get("content")]
-    try:
-        body["evidence"] = evidence.gather(command, scripts)
-    except Exception:  # evidence is a help, never a reason to give no verdict
-        body["evidence"] = {"error": "could not gather evidence"}
-    # json.dumps already escapes non-ASCII (so bidi tricks arrive as \uXXXX);
-    # also escape "@" so nothing in the request can act as an @file mention.
-    prompt = "<request>\n" + json.dumps(body, indent=2).replace("@", "\\u0040") + "\n</request>"
+    prompt, command = request_prompt(req)
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -212,8 +241,9 @@ def main():
             if os.environ.get("OMASUDO_DEBUG"):
                 print(failed[-1], file=sys.stderr)
             continue
+        shown = f"{name} ({data['fallback_model']})" if data.get("fallback_model") else name
         emit(data["verdict"], visible(str(data.get("summary", ""))[:400]),
-             visible(str(data.get("details", ""))[:1500], keep="\n"), command, name)
+             visible(str(data.get("details", ""))[:1500], keep="\n"), command, shown)
         return
     emit("ERROR", "No reviewer answered (" + "; ".join(failed) + "); judge the command yourself.")
 

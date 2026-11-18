@@ -177,7 +177,8 @@ Item {
         command: info.command,
         parentCommand: info.parentCommand,
         chain: info.chain,
-        files: info.files || []
+        files: info.files || [],
+        cwd: info.cwd || ""
       })]
     })
     var pending = Object.assign({}, pendingReviews)

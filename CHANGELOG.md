@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+- Choose each reviewer's model and reasoning level: after an agent, setup lists the models and levels it offers (Claude Code, Codex, pi and omp; models only for opencode and Grok). Default leaves it to the agent.
+- `omasudo test [agent]`, also offered at the end of setup: 24 root requests with known answers (15 of them dangerous) go through the same review as the dialog, and each verdict scores good (expected), okay (more cautious) or fail (less cautious). Nothing is run. The answers per expected verdict follow, with how many dangerous requests were called DANGEROUS. The counts are kept per agent, model and level, and the picker shows them.
+- `omasudo test --blind`: a held-out set of 24 requests the prompt is never tuned on, to check that it generalizes. Printed, not kept.
+- Sharper verdict definitions for reviewers: SAFE also covers routine changes undone by one obvious command that touch no files, packages or data; CAUTION is config edits, packages, deleted files and stopped services; DANGEROUS adds lasting root (sudoers, polkit rules, setuid) and code the reviewer can't see. Reviewers are told that long encoded blobs are redacted too.
+- When Claude's safeguards decline to review a dangerous request, it is asked again on the model Claude Code itself switches to (Opus 4.8 for Opus, Sonnet 5 for Sonnet), and the dialog names that model. `claude -p` doesn't switch on its own, so `passwd -d root` used to get no verdict on Opus 5.5.
+- Evidence shows where a path in the command really leads when it goes through a symlink, relative paths taken from the requester's folder: `rm -rf build-cache/` on a link to `/usr` is no longer a cache cleanup to a reviewer that can't look.
+
 ## 0.5.0
 - Choose the reviewer: Claude Code, Codex, pi, omp, opencode or Grok, with fallbacks in order, or no AI review. Setup lists the agents it finds, marks the Omarchy default and which are signed in, and starts on the default. Running `omasudo` opens setup again, starting on the current reviewer; `omasudo agents` lists the agents. Existing installs are asked once.
 - An `omasudo` command: the dialog adds `~/.local/bin/omasudo`, which runs the plugin, so `omasudo reviewer` works from any terminal. It is also in the Omarchy menu (Super+Space search, Apps) and the app launcher, through `~/.local/share/applications/omasudo.desktop`. Files there it didn't write are left alone; removing the plugin removes both.

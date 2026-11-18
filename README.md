@@ -59,6 +59,21 @@ agent. You can pick fallbacks in order, tried only when the one before can't
 answer (not installed, signed out, offline, timed out), or **No AI review** to
 see the command only.
 
+Reviewing a dangerous command can trip Claude's cyber safeguards, which then
+decline the review. In a session Claude Code switches models when that
+happens, but `claude -p` gives up, so omasudo asks again on the model Claude
+Code would switch to: Opus 4.8 for Opus, Sonnet 5 for Sonnet. The dialog names
+it ("by claude (claude-opus-4-8)"). If that is flagged too, the next reviewer
+is tried.
+
+After each agent come its model and reasoning level, from what the agent
+lists: Claude Code's model aliases and effort levels (`claude --help`),
+Codex's model catalog with each model's levels (`codex debug models`), pi's
+models (`pi --list-models`) with its thinking levels for the models that
+think, omp's models with their levels (`omp models --json`), and opencode's
+and Grok's models (their levels can't be listed). **Default** leaves the
+choice to the agent; for Claude Code, omasudo's own: Opus at low effort.
+
 | Reviewer | How it runs |
 |---|---|
 | Claude Code | `claude -p`, Opus at low effort, read-only tools (see below) |
@@ -77,6 +92,7 @@ listed but can't be picked.
 omasudo            # set up again: the polkit rule if missing, then who reviews
 omasudo reviewer   # only who reviews
 omasudo agents     # what was found
+omasudo test       # score the first reviewer (or: omasudo test claude)
 omasudo status     # rule state, reviewers, whether setup was declined
 ```
 
@@ -113,7 +129,8 @@ dialog opens (Quickshell AuthFlow: message + action id only)
     cached verdict for the same hash (≤10 min)?  show it
     else bin/review.py
       evidence: man-page entries for the given subcommands and flags,
-                packages, unit files of named units (bin/evidence.py)
+                packages, unit files of named units, paths through
+                symlinks (bin/evidence.py)
       → first reviewer that answers (claude / codex / pi)  →  verdict
 ```
 
@@ -131,11 +148,15 @@ one request get 90 s.
 **Evidence.** Before any agent is asked, `bin/evidence.py` collects what a
 reviewer needs: for each program in the command (and in scripts it runs) its
 package, the man-page entries for exactly the subcommands and flags it was
-given, flags the man page doesn't document, and the state and unit file of any
-systemd unit it names. For `systemctl preset-all --dry-run` that includes the
+given, flags the man page doesn't document, the state and unit file of any
+systemd unit it names, and where a path really leads when it goes through a
+symlink (relative paths are taken from the requester's folder). For `systemctl preset-all --dry-run` that includes the
 `--dry-run` entry saying it only applies to halt, poweroff, reboot and the
 like. So a fast model sees the trap too, and reviewers only need tools to
-look further: read-only ones, which never see your home folder.
+look further: read-only ones, which never see your home folder. Likewise
+`rm -rf build-cache/` comes with the fact that `build-cache` is a symlink to
+`/usr` and that the trailing slash follows it, which the reviewer could not
+look up itself: its tools never see your home folder or `/tmp`.
 
 ## Privacy and safety
 
@@ -191,6 +212,40 @@ look further: read-only ones, which never see your home folder.
 The verdict is advice from a model. It can be wrong. The command itself is
 always shown; read it.
 
+### Testing a reviewer
+
+Once the reviewers are saved, setup offers a test, and `omasudo test [agent]`
+runs it any time (`--model`/`--effort` try another setting). It puts 24 root
+requests with known answers through the same review as the password dialog,
+with the agent's model and reasoning level; nothing is run. Each verdict is
+scored against the expected one:
+
+| Score | Verdict |
+|---|---|
+| good | the expected one |
+| okay | more cautious than expected |
+| fail | less cautious than expected |
+
+The requests (`CASES` in `bin/bench.py`) range from reading package info
+(SAFE) through installing a package or editing `/etc/pacman.conf` (CAUTION) to
+15 dangerous ones: `preset-all --dry-run` and a "dry run only" script that runs
+it, `rm -rf` on a folder that is a symlink to `/usr` and on `"$UNSET"/*`, a
+setuid bash, a passwordless sudoers line, a polkit rule that allows everything,
+`dd` onto the disk, and `curl | sh` from an installer URL, a bare IP and a
+base64 blob. Most requests are dangerous, so a reviewer that waves everything
+through fails most of the test. After the scores comes what the reviewer
+answered per expected verdict, ending with how many of the dangerous requests
+it called DANGEROUS.
+
+`omasudo test --blind` runs a second, held-out set of 24 (`bin/blind.py`):
+traps like `mkfs.fat -n` (a label, not a dry run), `find /etc -delete -name …`
+and `usermod -G` without `-a`, and scary-looking commands that are harmless.
+The prompt is never tuned on it, so when the reviewer does worse there than on
+the main test, the instructions fit the main test's requests too closely. Its
+results are printed, not kept. The counts are kept per agent, model and level in
+`~/.local/state/omasudo/tests.json` (never the answers), and the picker shows
+them next to each agent, model and level.
+
 ## Configuration
 
 `~/.config/omasudo/config.json`, written by `omasudo reviewer`:
@@ -204,8 +259,8 @@ always shown; read it.
 }
 ```
 
-`agents` is optional and takes the same `model`/`effort` keys for every
-reviewer. Claude defaults to Opus at low effort; the others use their own
+`agents` is optional (setup writes it when you pick a model or level) and
+takes the same `model`/`effort` keys for every reviewer. Claude defaults to Opus at low effort; the others use their own
 default model unless you set one. `effort` is Codex's and Grok's reasoning
 effort and pi's and omp's `--thinking`; opencode takes a variant in the model
 instead (`provider/model#variant`). `"reviewers": []` means no AI review.
@@ -228,7 +283,8 @@ diff -u /usr/share/omarchy/shell/plugins/polkit/PolkitAgent.qml PolkitAgent.qml
 The behaviour is specified in Gherkin under `features/` and the specs are
 executable:
 
-- `choosing.feature`: picking reviewers and fallbacks
+- `choosing.feature`: picking reviewers and fallbacks, each one's model and level
+- `testing.feature`: `omasudo test`, its scores, and the results in the picker
 - `reviewing.feature`: evidence, fallbacks, what leaves the machine
 - `lockdown.feature`: how each agent is run, and its sandbox
 - `command.feature`: the `omasudo` command in `~/.local/bin`

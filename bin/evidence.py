@@ -2,8 +2,9 @@
 
 gather(command, scripts) returns a dict for the review prompt: for every
 program in the command (and in scripts it runs) its package, the man-page
-entries for the subcommands and flags it was given, and the unit files of any
-systemd units it names. Only read-only commands run here (man, pacman -Qo,
+entries for the subcommands and flags it was given, the unit files of any
+systemd units it names, and where a path in it leads when that goes through a
+symlink (relative paths are taken from the requester's folder, cwd). Only read-only commands run here (man, pacman -Qo,
 systemctl cat/is-enabled/is-active), each with a short timeout.
 """
 import functools
@@ -18,6 +19,7 @@ MAX_MAN = 9000         # chars of man excerpts per program
 MAX_UNIT = 3000        # chars per unit file
 MAX_PROGRAMS = 6
 MAX_UNITS = 4
+MAX_PATHS = 6
 # Wrappers whose arguments are another command: the options that take a value
 # (so `sudo -u root cmd` is cmd, not root), and how many plain arguments come
 # before the command (timeout's duration, taskset's mask, flock's lock file).
@@ -235,12 +237,42 @@ def unit_evidence(unit):
     }
 
 
-def gather(command, scripts=()):
+def path_evidence(arg, cwd):
+    """Where a path argument really leads, when a symlink is on the way.
+    With a trailing slash the last symlink is followed too (rm -r link/ empties
+    the folder it points to)."""
+    if not arg or arg.startswith("-") or len(arg) > 4096:
+        return None
+    if not os.path.isabs(arg):
+        if not cwd:
+            return None
+        arg_path = os.path.join(cwd, arg)
+    else:
+        arg_path = arg
+    plain = os.path.normpath(arg_path)
+    try:
+        leads_to = os.path.realpath(plain, strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if leads_to == plain:
+        return None
+    info = {"path": arg, "leads_to": leads_to, "is_symlink": os.path.islink(plain),
+            "type": "folder" if os.path.isdir(leads_to) else "file"}
+    if arg.endswith("/") and info["is_symlink"]:
+        info["trailing_slash"] = True
+    return info
+
+
+def gather(command, scripts=(), cwd=None):
     cmds = list(commands_in(split(command)))
     for text in scripts:
         cmds += list(script_commands(text))
-    programs, seen, units = [], {}, []
+    programs, seen, units, paths = [], {}, [], []
     for argv in cmds:
+        for a in (argv or [])[1:]:
+            p = path_evidence(a, cwd) if len(paths) < MAX_PATHS else None
+            if p and p not in paths:
+                paths.append(p)
         if not argv or len(programs) >= MAX_PROGRAMS:
             continue
         key = os.path.basename(argv[0])
@@ -263,4 +295,6 @@ def gather(command, scripts=()):
     out = {"programs": programs}
     if units:
         out["units"] = [unit_evidence(u) for u in units]
+    if paths:
+        out["paths_through_symlinks"] = paths
     return out

@@ -75,6 +75,50 @@ Feature: Reviewing a request
       When the agent asks to run "systemctl restart bluetooth"
       Then the dialog shows NO VERDICT "No reviewer chosen yet: run omasudo reviewer."
 
+  Rule: When Claude's safeguards flag a review, the model Claude Code switches to answers
+
+    Reviewing a dangerous root command can trip Claude's cyber safeguards, and
+    `claude -p` then gives up instead of switching models as Claude Code does
+    in a session. omasudo asks again on that model: Opus 4.8 for Opus, Sonnet
+    5 for Sonnet.
+
+    Scenario: A flagged review is answered by Opus 4.8
+      Given the config has the reviewers "claude"
+      And claude answers DANGEROUS "Leaves root without a password."
+      And claude's safeguards flag reviews on "opus"
+      When the agent asks to run "passwd -d root"
+      Then the dialog shows DANGEROUS "Leaves root without a password." by "claude (claude-opus-4-8)"
+      And claude was asked on "opus", then on "claude-opus-4-8"
+
+    Scenario: The fallback follows the chosen model
+      Given the config has the reviewers "claude"
+      And the config sets claude's model to "sonnet" and effort to "high"
+      And claude answers DANGEROUS "Leaves root without a password."
+      And claude's safeguards flag reviews on "sonnet"
+      When the agent asks to run "passwd -d root"
+      Then the dialog shows DANGEROUS "Leaves root without a password." by "claude (claude-sonnet-5)"
+
+    Scenario: Flagged on the fallback too, the next reviewer answers
+      Given the config has the reviewers "claude, pi"
+      And claude's safeguards flag reviews on "opus, claude-opus-4-8"
+      And pi answers DANGEROUS "Leaves root without a password."
+      When the agent asks to run "passwd -d root"
+      Then the dialog shows DANGEROUS "Leaves root without a password." by "pi"
+
+    Scenario: Why there is no verdict says the safeguards declined
+      Given the config has the reviewers "claude"
+      And claude's safeguards flag reviews on "opus, claude-opus-4-8"
+      When the agent asks to run "passwd -d root"
+      Then the dialog shows NO VERDICT "No reviewer answered (claude: safeguards declined to review, also on claude-opus-4-8); judge the command yourself."
+
+    Scenario: A model without a known fallback is not asked again
+      Given the config has the reviewers "claude"
+      And the config sets claude's model to "fable" and effort to "low"
+      And claude's safeguards flag reviews on "fable"
+      When the agent asks to run "passwd -d root"
+      Then the dialog shows NO VERDICT "No reviewer answered (claude: safeguards declined to review); judge the command yourself."
+      And claude was asked on "fable"
+
   Rule: Reviewers get the evidence, not tools
 
     Scenario: The man page says what --dry-run really does
@@ -126,6 +170,20 @@ Feature: Reviewing a request
       And pi answers SAFE "Restarts the journal."
       When the agent asks to run "systemctl restart systemd-journald"
       Then pi was given the unit file of "systemd-journald.service"
+
+    Scenario: A path through a symlink comes with where it really leads
+      Given the config has the reviewers "pi"
+      And pi answers DANGEROUS "Empties /usr."
+      And "build-cache" is a symlink to "/usr"
+      When the agent asks to run "rm -rf build-cache/"
+      Then pi was told "build-cache/" leads to "/usr"
+
+    Scenario: Without the trailing slash, the symlink itself is named
+      Given the config has the reviewers "pi"
+      And pi answers SAFE "Removes only the link."
+      And "build-cache" is a symlink to "/usr"
+      When the agent asks to run "rm -rf build-cache"
+      Then pi was told "build-cache" leads to "/usr"
 
     Scenario: A script that runs is reviewed with its contents
       Given the config has the reviewers "pi"

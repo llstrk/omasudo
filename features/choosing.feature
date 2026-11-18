@@ -108,6 +108,113 @@ Feature: Choosing who reviews agent requests
       When I run "omasudo status"
       Then it prints "reviewers=pi,claude"
 
+  Rule: After each agent, its model and reasoning level, as far as the agent lists them
+
+    Scenario: Claude's models and levels, with omasudo's own defaults first
+      Given "claude --help" prints:
+        | --effort <level>  Effort level for the session (low, high, max)     |
+        | --model <model>   Model for the session: an alias ('opus' or 'sonnet') |
+      When I run "omasudo reviewer" and choose:
+        | claude      |
+        | sonnet      |
+        | high        |
+        | No fallback |
+      Then the second question is "Model for claude" and offers:
+        | Default opus |
+        | opus         |
+        | sonnet       |
+      And the third question is "Reasoning for claude · sonnet" and offers:
+        | Default low |
+        | low         |
+        | high        |
+        | max         |
+      And the config sets claude's model to "sonnet" and effort to "high"
+      And it prints "claude sonnet, high"
+
+    Scenario: "Default" leaves the choice to the agent
+      Given "claude --help" prints:
+        | --effort <level>  Effort level for the session (low, high, max)     |
+        | --model <model>   Model for the session: an alias ('opus' or 'sonnet') |
+      And the config sets claude's model to "sonnet" and effort to "max"
+      When I run "omasudo reviewer" and choose:
+        | claude      |
+        | Default     |
+        | Default     |
+        | No fallback |
+      Then the config has no settings for claude
+
+    Scenario: The screens start on the current model and level
+      Given "claude --help" prints:
+        | --effort <level>  Effort level for the session (low, high, max)     |
+        | --model <model>   Model for the session: an alias ('opus' or 'sonnet') |
+      And the config sets claude's model to "sonnet" and effort to "max"
+      When I run "omasudo reviewer" and choose:
+        | claude |
+        | sonnet |
+      Then the second question starts on "sonnet"
+      And the third question starts on "max"
+
+    Scenario: Esc on the model screen keeps what was set
+      Given "claude --help" prints:
+        | --effort <level>  Effort level for the session (low, high, max)     |
+        | --model <model>   Model for the session: an alias ('opus' or 'sonnet') |
+      And the config sets claude's model to "sonnet" and effort to "max"
+      When I run "omasudo reviewer" and choose:
+        | claude |
+        | ESC    |
+      Then the config sets claude's model to "sonnet" and effort to "max"
+      And the config has the reviewers "claude"
+
+    Scenario: Each Codex model has its own levels, and hidden models are not listed
+      Given "codex debug models" prints:
+        | {"models": [{"slug": "gpt-a", "display_name": "GPT A", "visibility": "list", "default_reasoning_level": "medium", "supported_reasoning_levels": [{"effort": "low"}, {"effort": "medium"}]}, {"slug": "gpt-secret", "visibility": "hide", "supported_reasoning_levels": []}]} |
+      When I run "omasudo reviewer" and choose:
+        | codex       |
+        | gpt-a       |
+        | low         |
+        | No fallback |
+      Then the second question is "Model for codex" and offers:
+        | Default codex's own default |
+        | GPT A gpt-a                 |
+      And the third question is "Reasoning for codex · gpt-a" and offers:
+        | Default medium |
+        | low            |
+        | medium         |
+      And the config sets codex's model to "gpt-a" and effort to "low"
+
+    Scenario: A pi model that doesn't think has no reasoning screen
+      Given "pi --list-models" prints:
+        | provider  model  context  max-out  thinking  images |
+        | local     think  128K     32K      yes       no     |
+        | local     fast   128K     32K      no        no     |
+      And "pi --help" prints:
+        | --thinking <level>  Set thinking level: off, low, high |
+      When I run "omasudo reviewer" and choose:
+        | pi          |
+        | local/fast  |
+        | No fallback |
+      Then the second question is "Model for pi"
+      And the third question is "If pi can't answer, fall back to"
+      And the config sets pi's model to "local/fast" only
+
+    Scenario: A fallback gets its own model screen
+      Given "claude --help" prints:
+        | --model <model>   Model for the session: an alias ('opus' or 'sonnet') |
+      When I run "omasudo reviewer" and choose:
+        | pi     |
+        | claude |
+        | sonnet |
+        | Done   |
+      Then the third question is "Model for claude"
+      And the config sets claude's model to "sonnet" only
+
+    Scenario: An agent that lists no models goes straight on
+      When I run "omasudo reviewer" and choose:
+        | opencode    |
+        | No fallback |
+      Then the second question is "If opencode can't answer, fall back to"
+      And the config has the reviewers "opencode"
+
   Rule: Running omasudo opens setup
 
     Scenario: The picker opens on the current reviewer
